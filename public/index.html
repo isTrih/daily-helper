@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>项目快报控制台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="项目快报首页">
+        <span class="brand-mark">D</span>
+        <span>
+          <strong>Daily Brief</strong>
+          <small>项目快报控制台</small>
+        </span>
+      </a>
+      <div class="connection" id="connectionState"><span></span>正在连接数据源</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">PROJECT INTELLIGENCE</p>
+        <h1>把今天的增长，<br /><em>送到该看到的人面前。</em></h1>
+        <p class="hero-copy">选择群聊、项目与期次，一次生成累计数据、今日新增和播放增长 Top 5。</p>
+      </section>
+
+      <form id="reportForm" class="workspace">
+        <section class="panel composer" aria-labelledby="composerTitle">
+          <div class="panel-head">
+            <div>
+              <p class="step">01 / RECIPIENTS</p>
+              <h2 id="composerTitle">发送到哪里</h2>
+            </div>
+            <button class="text-button" id="refreshButton" type="button">刷新数据</button>
+          </div>
+
+          <fieldset class="field-block">
+            <legend>机器人所在群聊</legend>
+            <div id="chatList" class="choice-list skeleton-list" aria-live="polite">
+              <div class="skeleton"></div><div class="skeleton"></div>
+            </div>
+            <label class="manual-chat">
+              <span>或输入群聊 ID</span>
+              <input id="manualChatId" type="text" placeholder="oc_xxxxxxxxxxxxxxxx" autocomplete="off" />
+            </label>
+            <p class="field-hint" id="chatHint"></p>
+          </fieldset>
+
+          <div class="divider"></div>
+
+          <div class="panel-head compact">
+            <div>
+              <p class="step">02 / FORMAT</p>
+              <h2>日报形式</h2>
+            </div>
+          </div>
+          <fieldset class="segmented" aria-label="日报形式">
+            <label><input type="radio" name="mode" value="combined" checked /><span>多合一速览<small>一张卡片汇总所选项目</small></span></label>
+            <label><input type="radio" name="mode" value="single" /><span>单独日报<small>每个项目发送一张卡片</small></span></label>
+          </fieldset>
+
+          <div class="panel-head compact projects-head">
+            <div>
+              <p class="step">03 / PROJECTS</p>
+              <h2>包含哪些项目</h2>
+            </div>
+            <button class="text-button" id="selectLatestButton" type="button">所有项目</button>
+          </div>
+          <div id="projectList" class="project-list skeleton-list" aria-live="polite">
+            <div class="skeleton tall"></div><div class="skeleton tall"></div><div class="skeleton tall"></div>
+          </div>
+
+          <fieldset class="rank-switch">
+            <legend>Top 5 排行口径</legend>
+            <label><input type="radio" name="rankingMode" value="today" checked /><span>今日播放增长</span></label>
+            <label><input type="radio" name="rankingMode" value="period" /><span>本期播放增长</span></label>
+          </fieldset>
+        </section>
+
+        <aside class="panel dispatch" aria-labelledby="dispatchTitle">
+          <p class="step">READY TO DISPATCH</p>
+          <h2 id="dispatchTitle">发送摘要</h2>
+          <div class="summary-card">
+            <div class="summary-date" id="todayLabel">—</div>
+            <div class="summary-grid">
+              <div><span>项目</span><strong id="projectCount">—</strong></div>
+              <div><span>卡片</span><strong id="cardCount">—</strong></div>
+              <div><span>群聊</span><strong id="chatCount">—</strong></div>
+            </div>
+            <div id="selectedSummary" class="selected-summary">正在读取项目…</div>
+          </div>
+
+          <div class="preview" id="preview" aria-live="polite">
+            <p>点击“预览数据”后，将在这里展示即将发送的飞书卡片标题。</p>
+          </div>
+
+          <div class="actions">
+            <button type="button" class="button secondary" id="previewButton">预览数据</button>
+            <button type="submit" class="button primary" id="sendButton"><span>立即发送日报</span><b>↗</b></button>
+          </div>
+          <p class="fine-print">“立即发送”会真实调用飞书消息接口。自动日报由环境变量中的默认群聊与 Cron 时间控制。</p>
+        </aside>
+      </form>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <noscript>此页面需要启用 JavaScript 才能配置和发送日报。</noscript>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

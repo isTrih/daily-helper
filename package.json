@@ -1,0 +1,24 @@
+{
+  "name": "lark-project-daily-report",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.74.0",
+    "croner": "^9.1.0",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.22",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  }
+}
