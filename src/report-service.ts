@@ -1,4 +1,4 @@
-import type { PeriodReport, ProjectPeriod, RankingMode } from "./types.ts";
+import type { PeriodReport, ProjectPeriod, RankingMode, VideoSummary } from "./types.ts";
 import { emptyLiveSummary, emptyVideoSummary, XingtuClient } from "./xingtu-client.ts";
 
 interface MetadataCache {
@@ -63,6 +63,7 @@ export class ReportService {
 
     const today = dateInTimezone(this.timezone);
     const yesterday = previousIsoDate(today);
+    const dayBeforeYesterday = previousIsoDate(yesterday);
     const from = period.trackingStartDate ?? period.taskMonth ?? today;
     const configuredEnd = period.trackingEndDate ?? today;
     const to = today < from ? from : minIsoDate(today, configuredEnd);
@@ -81,6 +82,9 @@ export class ReportService {
       : Promise.resolve(emptyVideoSummary());
     const videoYesterdayPromise = videoConfig
       ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: yesterday })
+      : Promise.resolve(emptyVideoSummary());
+    const videoDayBeforeYesterdayPromise = videoConfig
+      ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: dayBeforeYesterday })
       : Promise.resolve(emptyVideoSummary());
     const topGrowthPromise = videoConfig
       ? this.client.getTopGrowth(
@@ -103,6 +107,7 @@ export class ReportService {
       videoCumulative,
       videoToday,
       videoYesterday,
+      videoDayBeforeYesterday,
       topGrowth,
       liveCumulative,
       liveToday,
@@ -111,6 +116,7 @@ export class ReportService {
       videoCumulativePromise,
       videoTodayPromise,
       videoYesterdayPromise,
+      videoDayBeforeYesterdayPromise,
       topGrowthPromise,
       liveCumulativePromise,
       liveTodayPromise,
@@ -120,7 +126,12 @@ export class ReportService {
     const value: PeriodReport = {
       period,
       range: { from, to, today, yesterday },
-      video: { cumulative: videoCumulative, today: videoToday, yesterday: videoYesterday, topGrowth },
+      video: {
+        cumulative: videoCumulative,
+        today: withVideoCountDeltas(videoToday, videoYesterday),
+        yesterday: withVideoCountDeltas(videoYesterday, videoDayBeforeYesterday),
+        topGrowth,
+      },
       live: { cumulative: liveCumulative, today: liveToday, yesterday: liveYesterday },
     };
     this.reportCache.set(cacheKey, { value, expiresAt: Date.now() + this.cacheTtlMs });
@@ -165,4 +176,12 @@ export function previousIsoDate(value: string): string {
 
 function minIsoDate(a: string, b: string): string {
   return a < b ? a : b;
+}
+
+function withVideoCountDeltas(current: VideoSummary, previous: VideoSummary): VideoSummary {
+  return {
+    ...current,
+    contentCount: Math.max(0, current.contentCount - previous.contentCount),
+    authorCount: Math.max(0, current.authorCount - previous.authorCount),
+  };
 }

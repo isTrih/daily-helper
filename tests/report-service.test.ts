@@ -14,15 +14,15 @@ const period: ProjectPeriod = {
 };
 
 describe("ReportService", () => {
-  test("并发查询今日与昨日的视频和直播汇总", async () => {
+  test("视频播放保留单日口径，稿件和作者按相邻日期计算新增", async () => {
     const videoDates: Array<string | undefined> = [];
     const liveDates: Array<string | undefined> = [];
-    const videoSummary = (playCount: number): VideoSummary => ({
+    const videoSummary = (playCount: number, contentCount = 0, authorCount = 0): VideoSummary => ({
       playCount,
       likeCount: 0,
       commentCount: 0,
-      contentCount: 0,
-      authorCount: 0,
+      contentCount,
+      authorCount,
     });
     const liveSummary = (liveExposurePv: number): LiveSummary => ({
       liveExposurePv,
@@ -38,7 +38,12 @@ describe("ReportService", () => {
       ],
       getVideoSummary: async (_id: number, range: { date?: string }) => {
         videoDates.push(range.date);
-        return videoSummary(range.date ? 10 : 100);
+        if (!range.date) return videoSummary(999, 962, 87);
+        const today = dateInTimezone("Asia/Shanghai");
+        const yesterday = previousIsoDate(today);
+        if (range.date === today) return videoSummary(803_000, 962, 87);
+        if (range.date === yesterday) return videoSummary(1_110_000, 928, 86);
+        return videoSummary(908_000, 857, 86);
       },
       getLiveSummary: async (_id: number, range: { date?: string }) => {
         liveDates.push(range.date);
@@ -50,13 +55,16 @@ describe("ReportService", () => {
     const [report] = await service.buildReports([10], "today");
     const today = dateInTimezone("Asia/Shanghai");
     const yesterday = previousIsoDate(today);
+    const dayBeforeYesterday = previousIsoDate(yesterday);
 
     expect(videoDates).toContain(today);
     expect(videoDates).toContain(yesterday);
+    expect(videoDates).toContain(dayBeforeYesterday);
     expect(liveDates).toContain(today);
     expect(liveDates).toContain(yesterday);
     expect(report?.range.yesterday).toBe(yesterday);
-    expect(report?.video.yesterday.playCount).toBe(10);
+    expect(report?.video.today).toMatchObject({ playCount: 803_000, contentCount: 34, authorCount: 1 });
+    expect(report?.video.yesterday).toMatchObject({ playCount: 1_110_000, contentCount: 71, authorCount: 0 });
     expect(report?.live.yesterday.liveExposurePv).toBe(20);
   });
 
