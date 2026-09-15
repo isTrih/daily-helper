@@ -22,8 +22,12 @@ describe("发送数据群聊指令", () => {
       .toEqual({ chatId: "oc_group_1", messageId: "om_command_1" });
   });
 
-  test("没有提及机器人时不触发", () => {
+  test("不提及机器人时仅巴拉拉能量可发送全部项目", () => {
     expect(parseSendDataCommand(message("发送数据", []))).toBeUndefined();
+    expect(parseSendDataCommand(message("巴拉拉能量", [])))
+      .toEqual({ chatId: "oc_group_1", messageId: "om_command_1" });
+    expect(parseSendDataCommand(message("巴拉拉能量！", [])))
+      .toEqual({ chatId: "oc_group_1", messageId: "om_command_1" });
   });
 
   test("项目定向关键词不需要提及机器人且不区分大小写", () => {

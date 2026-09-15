@@ -32,7 +32,11 @@ export function parseSendDataCommand(
     let text = content.text;
     for (const mention of message.mentions ?? []) text = text.replaceAll(mention.key, "");
     const keyword = text.replace(/[，,。.!！?？]/g, "").trim();
-    if ((message.mentions?.length ?? 0) > 0 && sendDataKeywords.has(keyword.replace(/\s/g, ""))) {
+    const normalizedKeyword = keyword.replace(/\s/g, "");
+    if (
+      sendDataKeywords.has(normalizedKeyword) &&
+      ((message.mentions?.length ?? 0) > 0 || normalizedKeyword === "巴拉拉能量")
+    ) {
       return { chatId: message.chat_id, messageId: message.message_id };
     }
 
