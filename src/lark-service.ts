@@ -20,6 +20,17 @@ export interface LongConnectionCardActionEvent {
   };
 }
 
+export interface LongConnectionMessageEvent {
+  message?: {
+    message_id?: string;
+    chat_id?: string;
+    chat_type?: string;
+    message_type?: string;
+    content: string;
+    mentions?: Array<{ key: string; name?: string }>;
+  };
+}
+
 export type CardActionResponse = {
   toast?: { type: "info" | "success" | "error" | "warning"; content: string };
   card?: { type: "raw"; data: CardJson };
@@ -86,6 +97,14 @@ export class LarkService {
     return messageId;
   }
 
+  async updateCard(messageId: string, card: CardJson): Promise<void> {
+    const response = await this.client.im.v1.message.patch({
+      path: { message_id: messageId },
+      data: { content: JSON.stringify(card) },
+    });
+    assertLarkSuccess(response.code, response.msg, `更新消息卡片 ${messageId}`);
+  }
+
   async recallMessage(messageId: string): Promise<void> {
     const response = await this.client.im.v1.message.delete({
       path: { message_id: messageId },
@@ -95,13 +114,16 @@ export class LarkService {
 
   async startCardActionConnection(
     handler: (event: LongConnectionCardActionEvent) => Promise<CardActionResponse>,
+    messageHandler: (event: LongConnectionMessageEvent) => Promise<void> = async () => {},
   ): Promise<void> {
     if (this.wsClient) return;
 
     const eventDispatcher = new lark.EventDispatcher({ loggerLevel: lark.LoggerLevel.info }).register<{
       "card.action.trigger": (data: LongConnectionCardActionEvent) => Promise<CardActionResponse>;
+      "im.message.receive_v1": (data: LongConnectionMessageEvent) => Promise<void>;
     }>({
       "card.action.trigger": handler,
+      "im.message.receive_v1": messageHandler,
     });
 
     this.wsClient = new lark.WSClient({

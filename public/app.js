@@ -17,14 +17,36 @@ await loadBootstrap();
 
 document.querySelector("#refreshButton").addEventListener("click", loadBootstrap);
 document.querySelector("#selectLatestButton").addEventListener("click", () => {
-  for (const checkbox of projectList.querySelectorAll(".project-check")) checkbox.checked = true;
-  for (const select of projectList.querySelectorAll("select")) {
-    const latest = [...select.options].find((option) => option.dataset.latest === "true");
-    if (latest) select.value = latest.value;
+  for (const row of projectList.querySelectorAll(".project-item")) {
+    row.querySelector(".project-check").checked = true;
+    for (const period of row.querySelectorAll(".period-check")) {
+      period.checked = period.dataset.latest === "true";
+    }
+    updatePeriodPicker(row);
   }
   updateSummary();
 });
-form.addEventListener("change", () => {
+form.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.matches(".period-check")) {
+    const row = target.closest(".project-item");
+    const selected = [...row.querySelectorAll(".period-check:checked")];
+    if (selected.length > 2) {
+      target.checked = false;
+      showToast("同一个项目最多选择两个期次", true);
+    } else if (selected.length > 0) {
+      row.querySelector(".project-check").checked = true;
+    }
+    updatePeriodPicker(row);
+  }
+  if (target.matches(".project-check") && target.checked) {
+    const row = target.closest(".project-item");
+    if (!row.querySelector(".period-check:checked")) {
+      const latest = row.querySelector('.period-check[data-latest="true"]') || row.querySelector(".period-check");
+      if (latest) latest.checked = true;
+    }
+    updatePeriodPicker(row);
+  }
   syncForwardPermissions();
   updateSummary();
 });
@@ -108,13 +130,14 @@ function renderProjects(periods) {
   for (const [projectId, items] of grouped) {
     const sorted = [...items].sort((a, b) => b.activityPeriodId - a.activityPeriodId);
     const latest = sorted.find((item) => item.isLatest) || sorted[0];
-    const row = document.createElement("label");
+    const row = document.createElement("div");
     row.className = "project-item";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "project-check";
     checkbox.checked = true;
     checkbox.dataset.projectId = String(projectId);
+    checkbox.setAttribute("aria-label", `选择${latest?.projectDisplayName || `项目 ${projectId}`}`);
     const copy = document.createElement("span");
     copy.className = "project-copy";
     const titleRow = document.createElement("strong");
@@ -127,37 +150,67 @@ function renderProjects(periods) {
     const meta = document.createElement("small");
     meta.textContent = `${sorted.length} 个可选期次 · 默认最新`;
     copy.append(titleRow, meta);
-    const select = document.createElement("select");
-    select.dataset.projectId = String(projectId);
-    select.setAttribute("aria-label", `${latest?.projectDisplayName || projectId} 期次`);
+    const picker = document.createElement("details");
+    picker.className = "period-select";
+    picker.dataset.projectId = String(projectId);
+    const summary = document.createElement("summary");
+    const summaryLabel = document.createElement("span");
+    summaryLabel.className = "period-select-label";
+    summary.append(summaryLabel);
+    const options = document.createElement("div");
+    options.className = "period-options";
     for (const period of sorted) {
-      const option = document.createElement("option");
-      option.value = String(period.activityPeriodId);
-      option.textContent = period.period;
-      option.dataset.latest = String(period.isLatest);
-      option.selected = period.isLatest;
-      select.append(option);
+      const option = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "period-check";
+      input.value = String(period.activityPeriodId);
+      input.dataset.projectId = String(projectId);
+      input.dataset.latest = String(period.isLatest);
+      input.checked = period.isLatest;
+      const text = document.createElement("span");
+      text.textContent = period.period;
+      option.append(input, text);
+      options.append(option);
     }
-    row.append(checkbox, copy, select);
+    picker.append(summary, options);
+    row.append(checkbox, copy, picker);
     projectList.append(row);
+    updatePeriodPicker(row);
   }
+}
+
+function updatePeriodPicker(row) {
+  const selected = [...row.querySelectorAll(".period-check:checked")];
+  const label = row.querySelector(".period-select-label");
+  label.textContent = selected.length === 0
+    ? "请选择期次"
+    : selected.length === 1
+      ? selected[0].nextElementSibling.textContent
+      : `已选 ${selected.length} 个期次`;
 }
 
 function collectRequest() {
   const periodIds = [];
   const names = [];
+  let projectCount = 0;
   for (const checkbox of projectList.querySelectorAll(".project-check")) {
     if (!checkbox.checked) continue;
-    const select = projectList.querySelector(`select[data-project-id="${checkbox.dataset.projectId}"]`);
-    periodIds.push(Number(select.value));
-    names.push(select.selectedOptions[0]?.textContent || select.value);
+    const row = checkbox.closest(".project-item");
+    const selected = [...row.querySelectorAll(".period-check:checked")];
+    if (selected.length === 0) continue;
+    projectCount += 1;
+    for (const period of selected) {
+      periodIds.push(Number(period.value));
+      names.push(period.nextElementSibling.textContent || period.value);
+    }
   }
   const mode = form.elements.mode.value;
   const rankingMode = form.elements.rankingMode.value;
   const enableForward = enableForwardInput.checked;
   const enableForwardInteraction = enableForward && enableForwardInteractionInput.checked;
   const showTrend = form.elements.showTrend.checked;
-  return { periodIds, mode, rankingMode, enableForward, enableForwardInteraction, showTrend, names };
+  return { periodIds, projectCount, mode, rankingMode, enableForward, enableForwardInteraction, showTrend, names };
 }
 
 function syncForwardPermissions() {
@@ -174,7 +227,7 @@ function collectChatIds() {
 function updateSummary() {
   const request = collectRequest();
   const chatIds = collectChatIds();
-  document.querySelector("#projectCount").textContent = String(request.periodIds.length);
+  document.querySelector("#projectCount").textContent = String(request.projectCount);
   document.querySelector("#cardCount").textContent = String(request.mode === "combined" && request.periodIds.length ? 1 : request.periodIds.length);
   document.querySelector("#chatCount").textContent = String(chatIds.length);
   document.querySelector("#selectedSummary").textContent = request.names.length
@@ -193,7 +246,7 @@ async function runAction(kind) {
     const response = await fetch(kind === "send" ? "/api/reports/send" : "/api/reports/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...request, chatIds, names: undefined }),
+      body: JSON.stringify({ ...request, chatIds, names: undefined, projectCount: undefined }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "请求失败");

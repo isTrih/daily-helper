@@ -10,6 +10,7 @@ export interface ReportRequest {
   enableForward?: boolean;
   enableForwardInteraction?: boolean;
   showTrend?: boolean;
+  showAllSelected?: boolean;
 }
 
 export interface SendReportRequest extends ReportRequest {
@@ -31,25 +32,46 @@ export class ReportOrchestrator {
       ? [...new Set(request.periodIds)]
       : (await this.reports.latestPeriods()).map((period) => period.activityPeriodId);
     if (requestedIds.length === 0) throw new Error("没有可发送的项目期次");
+    const periodsById = new Map(allPeriods.map((period) => [period.activityPeriodId, period]));
+    const requestedPeriods = requestedIds.map((periodId) => {
+      const period = periodsById.get(periodId);
+      if (!period) throw new Error(`期次 ${periodId} 不在当前可发送列表中`);
+      return period;
+    });
+    const periodCountByProject = new Map<number, number>();
+    for (const period of requestedPeriods) {
+      const count = (periodCountByProject.get(period.projectId) ?? 0) + 1;
+      if (count > 2) throw new Error(`${period.projectDisplayName} 最多可同时选择两个期次`);
+      periodCountByProject.set(period.projectId, count);
+    }
     const enableForward = request.enableForward ?? false;
     const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
     const showTrend = request.showTrend ?? false;
+    const interactiveExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString();
 
     if (request.mode === "combined") {
       const initialPeriodId = requestedIds[0]!;
-      const periodReports = await this.reports.buildReports([initialPeriodId], request.rankingMode, showTrend);
+      const combineSelectedPeriods = requestedIds.length > 1 &&
+        (periodCountByProject.size === 1 || request.showAllSelected === true);
+      const visiblePeriodIds = combineSelectedPeriods ? requestedIds : [initialPeriodId];
+      const periodReports = await this.reports.buildReports(
+        visiblePeriodIds,
+        request.rankingMode,
+        showTrend && visiblePeriodIds.length === 1,
+      );
       return [
         buildReportCard({
           reports: periodReports,
           allPeriods,
           state: {
-            scope: "period",
+            scope: combineSelectedPeriods ? "combined" : "period",
             periodIds: requestedIds,
-            selectedPeriodId: initialPeriodId,
+            ...(combineSelectedPeriods ? {} : { selectedPeriodId: initialPeriodId }),
             rankingMode: request.rankingMode,
             enableForward,
             enableForwardInteraction,
             showTrend,
+            interactiveExpiresAt,
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
@@ -63,7 +85,7 @@ export class ReportOrchestrator {
       buildReportCard({
         reports: [report],
         allPeriods,
-        interactive: false,
+        controlsMode: "tools",
         projectColors: this.projectColors,
         projectIcons: this.projectIcons,
         state: {
@@ -74,6 +96,8 @@ export class ReportOrchestrator {
           enableForward,
           enableForwardInteraction,
           showTrend,
+          controlsMode: "tools",
+          interactiveExpiresAt,
         },
         timezone: this.timezone,
       }),

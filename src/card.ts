@@ -81,6 +81,7 @@ export function buildReportCard(args: {
   state: CardViewState;
   timezone?: string;
   interactive?: boolean;
+  controlsMode?: "full" | "tools" | "none";
   projectColors?: ProjectColors;
   projectIcons?: ProjectIcons;
 }): CardJson {
@@ -88,22 +89,22 @@ export function buildReportCard(args: {
   if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
 
   const timezone = args.timezone ?? "Asia/Shanghai";
-  const interactive = args.interactive ?? true;
+  const controlsMode = args.controlsMode ?? (args.interactive === false ? "none" : "full");
+  const interactive = controlsMode !== "none";
   const projectColors = args.projectColors ?? {};
   const projectIcons = args.projectIcons ?? {};
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
+  const identity = cardIdentity(reports, projectColors, projectIcons);
   const isCombined = state.scope === "combined" && reports.length > 1;
-  const theme = focusedReport ? colorFor(focusedReport.period.projectId, projectColors) : "blue";
-  const iconKey = focusedReport ? projectIcons[focusedReport.period.projectId] : undefined;
-  const title = focusedReport ? focusedReport.period.period : "项目每日速览";
-  const subtitle = `统计区间 ${reports[0]!.range.from} — ${reports[0]!.range.to}`;
-  const tags = (isCombined ? reports.slice(0, 3) : []).map((report) => ({
+  const { theme, iconKey, title, subtitle } = identity;
+  const tagReports = [...new Map(reports.map((report) => [report.period.projectId, report])).values()];
+  const tags = (isCombined && tagReports.length > 1 ? tagReports.slice(0, 3) : []).map((report) => ({
     tag: "text_tag",
     text: { tag: "plain_text", content: report.period.projectDisplayName },
     color: colorFor(report.period.projectId, projectColors),
   }));
 
-  const elements: CardElement[] = interactive
+  const elements: CardElement[] = controlsMode === "full"
     ? [...controls(allPeriods, state), { tag: "hr", margin: "4px 0 8px 0" }]
     : [];
 
@@ -176,6 +177,46 @@ export function buildReportCard(args: {
       },
     ],
   });
+  if (state.interactiveExpiresAt || controlsMode === "tools") {
+    elements.push({
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "8px",
+      margin: "2px 0 0 0",
+      columns: [
+        ...(controlsMode === "tools"
+          ? [{
+              tag: "column",
+              width: "auto",
+              vertical_align: "center",
+              elements: [cardToolsOverflow(state, "full")],
+            }]
+          : []),
+        {
+          tag: "column",
+          width: "weighted",
+          weight: 1,
+          elements: [],
+        },
+        ...(state.interactiveExpiresAt
+          ? [{
+              tag: "column",
+              width: "auto",
+              vertical_align: "center",
+              elements: [{
+                tag: "div",
+                text: {
+                  tag: "lark_md",
+                  content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                  text_size: "notation",
+                  text_align: "right",
+                },
+              }],
+            }]
+          : []),
+      ],
+    });
+  }
 
   return {
     schema: "2.0",
@@ -253,6 +294,17 @@ export function buildCollapsedReportCard(args: {
             },
           ],
         },
+        ...(state.interactiveExpiresAt
+          ? [{
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
+                text_size: "notation",
+                text_align: "right",
+              },
+            }]
+          : []),
       ],
     },
   };
@@ -262,6 +314,7 @@ export function buildRecallConfirmationCard(args: {
   reports: PeriodReport[];
   state: CardViewState;
   returnView: "full" | "collapsed";
+  timezone?: string;
 }): CardJson {
   const { reports, state, returnView } = args;
   if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
@@ -294,6 +347,16 @@ export function buildRecallConfirmationCard(args: {
             content: "**确认撤回这条日报卡片？**\n<font color='grey'>撤回后将从当前会话中移除，且无法恢复。</font>",
           },
         },
+        ...(state.interactiveExpiresAt
+          ? [{
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
+                text_size: "notation",
+              },
+            }]
+          : []),
         {
           tag: "column_set",
           flex_mode: "bisect",
@@ -318,6 +381,92 @@ export function buildRecallConfirmationCard(args: {
   };
 }
 
+export function buildLoadingReportCard(state: CardViewState, timezone = "Asia/Shanghai"): CardJson {
+  return {
+    schema: "2.0",
+    config: interactiveCardConfig("日报更新中", "正在读取最新数据", state),
+    header: {
+      template: "blue",
+      title: { tag: "plain_text", content: "日报更新中" },
+      subtitle: { tag: "plain_text", content: "正在读取最新数据" },
+      icon: { tag: "standard_icon", token: "refresh_outlined" },
+      padding: "12px",
+    },
+    body: {
+      direction: "vertical",
+      padding: "20px 12px",
+      elements: [
+        {
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: "**正在更新日报**\n<font color='grey'>数据读取完成后会自动替换当前卡片，请稍候。</font>",
+            text_align: "center",
+          },
+        },
+        ...(state.interactiveExpiresAt
+          ? [{
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                text_size: "notation",
+                text_align: "left",
+              },
+            }]
+          : []),
+      ],
+    },
+  };
+}
+
+export function buildReportUpdateErrorCard(
+  state: CardViewState,
+  message: string,
+  timezone = "Asia/Shanghai",
+): CardJson {
+  return {
+    schema: "2.0",
+    config: interactiveCardConfig("日报更新失败", "请重新加载", state),
+    header: {
+      template: "red",
+      title: { tag: "plain_text", content: "日报更新失败" },
+      subtitle: { tag: "plain_text", content: "请重新加载" },
+      icon: { tag: "standard_icon", token: "warning_outlined" },
+      padding: "12px",
+    },
+    body: {
+      direction: "vertical",
+      padding: "16px 12px",
+      vertical_spacing: "10px",
+      elements: [
+        {
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: `<font color='grey'>${safeMarkdownText(message.slice(0, 120))}</font>`,
+          },
+        },
+        button("重新加载", "retry_report", {
+          action: "cancel_card_tools",
+          ...cardStateValue(state),
+          return_view: "full",
+        }, true, "primary"),
+        ...(state.interactiveExpiresAt
+          ? [{
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                text_size: "notation",
+              },
+            }]
+          : []),
+      ],
+    },
+  };
+}
+
 function cardIdentity(
   reports: PeriodReport[],
   projectColors: ProjectColors,
@@ -329,12 +478,21 @@ function cardIdentity(
   iconKey?: string;
 } {
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
+  const firstReport = reports[0]!;
+  const sharedProject = reports.length > 1 && reports.every(
+    (report) => report.period.projectId === firstReport.period.projectId,
+  );
+  const themedReport = focusedReport ?? (sharedProject ? firstReport : undefined);
   return {
-    title: focusedReport ? focusedReport.period.period : "项目每日速览",
-    subtitle: `统计区间 ${reports[0]!.range.from} — ${reports[0]!.range.to}`,
-    theme: focusedReport ? colorFor(focusedReport.period.projectId, projectColors) : "blue",
-    ...(focusedReport && projectIcons[focusedReport.period.projectId]
-      ? { iconKey: projectIcons[focusedReport.period.projectId] }
+    title: focusedReport
+      ? focusedReport.period.period
+      : sharedProject
+        ? `${firstReport.period.projectDisplayName} · 多期速览`
+        : "项目每日速览",
+    subtitle: `统计区间 ${firstReport.range.from} — ${firstReport.range.to}`,
+    theme: themedReport ? colorFor(themedReport.period.projectId, projectColors) : "blue",
+    ...(themedReport && projectIcons[themedReport.period.projectId]
+      ? { iconKey: projectIcons[themedReport.period.projectId] }
       : {}),
   };
 }
@@ -411,6 +569,8 @@ function cardStateValue(state: CardViewState): Record<string, string> {
     enable_forward: String(state.enableForward ?? false),
     enable_forward_interaction: String((state.enableForward ?? false) && (state.enableForwardInteraction ?? false)),
     show_trend: String(state.showTrend ?? false),
+    controls_mode: state.controlsMode ?? "full",
+    expires_at: state.interactiveExpiresAt ?? "",
   };
 }
 
@@ -424,6 +584,9 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
     ? availablePeriods.find((period) => period.activityPeriodId === state.selectedPeriodId)
     : undefined;
   const actionState = cardStateValue(state);
+  const aggregateLabel = new Set(availablePeriods.map((period) => period.projectId)).size === 1
+    ? "全部期次"
+    : "所有项目";
 
   return [
     {
@@ -471,7 +634,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
                 weight: 1,
                 padding: "8px 0",
                 elements: [
-                  button("所有项目", "view_latest", {
+                  button(aggregateLabel, "view_latest", {
                     action: "show_latest",
                     ...actionState,
                   }),
@@ -571,46 +734,54 @@ function reportElements(
     ? [{ tag: "div", text: { tag: "lark_md", content: heading, text_size: "heading" } }]
     : [];
   const dailyMetricColumns: CardElement[] = [
-    highlightMetric(
-      `▶ ${primaryDay}视频播放`,
-      primaryVideo.playCount,
-      `新增稿件 ${formatNumber(primaryVideo.contentCount)}\n新增作者 ${formatNumber(primaryVideo.authorCount)}`,
-      metricTones.video,
-      true,
-    ),
-    highlightMetric(
-      `${comparisonDay}视频播放`,
-      comparisonVideo.playCount,
-      `新增稿件 ${formatNumber(comparisonVideo.contentCount)}\n新增作者 ${formatNumber(comparisonVideo.authorCount)}`,
-      metricTones.content,
-      true,
-    ),
+    ...(hasDailyVideoData(primaryVideo)
+      ? [highlightMetric(
+          `${primaryDay}视频播放`,
+          primaryVideo.playCount,
+          `新增稿件 ${formatNumber(primaryVideo.contentCount)}\n新增作者 ${formatNumber(primaryVideo.authorCount)}`,
+          metricTones.video,
+          true,
+        )]
+      : []),
+    ...(hasDailyVideoData(comparisonVideo)
+      ? [highlightMetric(
+          `${comparisonDay}视频播放`,
+          comparisonVideo.playCount,
+          `新增稿件 ${formatNumber(comparisonVideo.contentCount)}\n新增作者 ${formatNumber(comparisonVideo.authorCount)}`,
+          metricTones.content,
+          true,
+        )]
+      : []),
     ...(hasLiveData
       ? [
-          highlightMetric(
-            `◉ ${primaryDay}开播`,
-            `${formatNumber(primaryLive.liveSessionCount)} 场`,
-            `参与主播 ${formatNumber(primaryLive.anchorCount)}`,
-            metricTones.live,
-          ),
-          highlightMetric(
-            `${comparisonDay}开播`,
-            `${formatNumber(comparisonLive.liveSessionCount)} 场`,
-            `参与主播 ${formatNumber(comparisonLive.anchorCount)}`,
-            metricTones.activity,
-          ),
+          ...(hasDailyLiveData(primaryLive)
+            ? [highlightMetric(
+                `${primaryDay}开播`,
+                `${formatNumber(primaryLive.liveSessionCount)} 场`,
+                `参与主播 ${formatNumber(primaryLive.anchorCount)}`,
+                metricTones.live,
+              )]
+            : []),
+          ...(hasDailyLiveData(comparisonLive)
+            ? [highlightMetric(
+                `${comparisonDay}开播`,
+                `${formatNumber(comparisonLive.liveSessionCount)} 场`,
+                `参与主播 ${formatNumber(comparisonLive.anchorCount)}`,
+                metricTones.activity,
+              )]
+            : []),
         ]
       : []),
   ];
-  const dailyMetrics: CardElement[] = [
-    {
-      tag: "column_set",
-      flex_mode: hasLiveData ? "flow" : "bisect",
-      horizontal_spacing: "6px",
-      margin: "2px 0",
-      columns: dailyMetricColumns,
-    },
-  ];
+  const dailyMetrics: CardElement[] = dailyMetricColumns.length > 0
+    ? [{
+        tag: "column_set",
+        flex_mode: hasLiveData ? "flow" : "bisect",
+        horizontal_spacing: "6px",
+        margin: "2px 0",
+        columns: dailyMetricColumns,
+      }]
+    : [];
   const cumulativeMetrics: CardElement[] = [
     summaryMetric("本期播放", video.cumulative.playCount, metricTones.video),
     summaryMetric(
@@ -792,6 +963,14 @@ function hasCumulativeLiveData(summary: PeriodReport["live"]["cumulative"]): boo
     summary.avgAcu !== null;
 }
 
+function hasDailyVideoData(summary: PeriodReport["video"]["today"]): boolean {
+  return summary.playCount !== 0 || summary.contentCount !== 0 || summary.authorCount !== 0;
+}
+
+function hasDailyLiveData(summary: PeriodReport["live"]["today"]): boolean {
+  return summary.liveSessionCount !== 0 || summary.anchorCount !== 0;
+}
+
 function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
   const points = report.video.trend;
   if (points.length < 2) {
@@ -809,11 +988,13 @@ function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
   return {
     tag: "chart",
     element_id: "video_daily_trend",
-    height: "260px",
-    margin: "8px 0 6px 0",
+    width: "fill",
+    height: "340px",
+    margin: "8px -12px 6px -12px",
     preview: true,
     chart_spec: {
       type: "common",
+      autoFit: true,
       title: { visible: true, text: "每日数据趋势" },
       color: [palette.play, palette.content, palette.author],
       data: [
@@ -873,7 +1054,7 @@ function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
       ],
       legends: { visible: true, orient: "bottom" },
       tooltip: { visible: true },
-      padding: { top: 38, right: 48, bottom: 32, left: 52 },
+      padding: { top: 34, right: 16, bottom: 24, left: 16 },
     },
   };
 }
@@ -1018,4 +1199,17 @@ function formatUpdateTime(timezone: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date());
+}
+
+function formatInteractionExpiry(value: string, timezone: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return safeMarkdownText(value);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }

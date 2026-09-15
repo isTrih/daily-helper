@@ -85,6 +85,19 @@ function reportWithoutLive(period: ProjectPeriod): PeriodReport {
   return value;
 }
 
+function reportWithoutDailyData(period: ProjectPeriod): PeriodReport {
+  const value = report(period);
+  const video = { playCount: 0, likeCount: 0, commentCount: 0, contentCount: 0, authorCount: 0 };
+  const live = { liveExposurePv: 0, avgAcu: null, liveSessionCount: 0, anchorCount: 0 };
+  value.video.today = video;
+  value.video.yesterday = video;
+  value.video.dayBefore = video;
+  value.live.today = live;
+  value.live.yesterday = live;
+  value.live.dayBefore = live;
+  return value;
+}
+
 describe("buildReportCard", () => {
   test("构建共享的 JSON 2.0 多合一卡片，并只展开每项目前 5 条", () => {
     const card = buildReportCard({
@@ -199,12 +212,13 @@ describe("buildReportCard", () => {
     expect(json).toContain("昨日 TOP · 视频播放");
     expect(json).toContain("昨日新增");
     expect(json).not.toContain("今日新增</font>");
-    expect(json).toContain("▶ 昨日视频播放");
+    expect(json).toContain("昨日视频播放");
     expect(json).toContain("前日视频播放");
-    expect(json.indexOf("▶ 昨日视频播放")).toBeLessThan(json.indexOf("前日视频播放"));
-    expect(json).toContain("◉ 昨日开播");
+    expect(json.indexOf("昨日视频播放")).toBeLessThan(json.indexOf("前日视频播放"));
+    expect(json).toContain("昨日开播");
     expect(json).toContain("前日开播");
-    expect(json).not.toContain("▶ 今日视频播放");
+    expect(json).not.toContain("▶");
+    expect(json).not.toContain("◉");
   });
 
   test("单期可显示主题衍生色的左右轴趋势图", () => {
@@ -223,7 +237,10 @@ describe("buildReportCard", () => {
     const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
     const chart = elements.find((element) => element.tag === "chart")!;
     const spec = chart.chart_spec as { series: Array<{ id: string; type: string }>; axes: Array<Record<string, unknown>> };
-    expect(chart.height).toBe("260px");
+    expect(chart.width).toBe("fill");
+    expect(chart.height).toBe("340px");
+    expect(chart.margin).toBe("8px -12px 6px -12px");
+    expect((chart.chart_spec as Record<string, unknown>).autoFit).toBe(true);
     expect(spec.series.map((series) => series.type)).toEqual(["area", "line", "line"]);
     expect(spec.axes).toContainEqual(expect.objectContaining({ orient: "left", seriesId: ["play_series"] }));
     expect(spec.axes).toContainEqual(expect.objectContaining({
@@ -453,5 +470,21 @@ describe("buildReportCard", () => {
     expect(json).not.toContain("直播");
     expect(json).not.toContain("主播");
     expect(json).not.toContain("平均 ACU");
+  });
+
+  test("今日与昨日所有日增为零时不展示日增指标卡", () => {
+    const card = buildReportCard({
+      reports: [reportWithoutDailyData(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+    });
+    const json = JSON.stringify(card);
+    expect(json).not.toContain("今日视频播放");
+    expect(json).not.toContain("昨日视频播放");
+    expect(json).not.toContain("今日开播");
+    expect(json).not.toContain("昨日开播");
+    expect(json).not.toContain('"height":"100px"');
+    expect(json).toContain("本期累计数据");
+    expect(json).toContain("今日 TOP · 视频播放");
   });
 });

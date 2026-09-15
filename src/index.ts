@@ -1,4 +1,5 @@
 import { Cron } from "croner";
+import { createSendDataCommandHandler } from "./bot-command.ts";
 import { createCardActionHandler } from "./card-actions.ts";
 import { readConfig } from "./config.ts";
 import { LarkService } from "./lark-service.ts";
@@ -26,6 +27,29 @@ const server = startServer({
   ...(larkService ? { larkService } : {}),
   orchestrator,
 });
+const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, projectCodes) => {
+  const latestPeriods = projectCodes ? await reportService.latestPeriods() : [];
+  const matchedPeriods = projectCodes
+    ? projectCodes.map((projectCode) => latestPeriods.find((period) =>
+        [period.projectKey, period.projectDisplayName].some((value) =>
+          Array.from(value.toUpperCase().matchAll(/[A-Z0-9]+/g), (match) => match[0]).includes(projectCode),
+        ),
+      ))
+    : [];
+  const missingProject = projectCodes?.find((_projectCode, index) => !matchedPeriods[index]);
+  if (missingProject) throw new Error(`未找到项目 ${missingProject} 的最新期次`);
+  const periodIds = projectCodes
+    ? matchedPeriods.map((period) => period!.activityPeriodId)
+    : [];
+  const result = await orchestrator.send({
+    chatIds: [chatId],
+    periodIds,
+    mode: "combined",
+    rankingMode: "today",
+    showAllSelected: projectCodes !== undefined,
+  });
+  console.info(`[lark] 发送数据指令执行完成，群聊 ${chatId}${projectCodes ? `，项目 ${projectCodes.join("/")}` : ""}，共 ${result.messageCount} 条消息`);
+});
 
 let scheduledJob: Cron | undefined;
 
@@ -38,7 +62,9 @@ if (larkService && config.lark.longConnectionEnabled) {
         config.projectColors,
         config.projectIcons,
         (messageId) => larkService.recallMessage(messageId),
+        (messageId, card) => larkService.updateCard(messageId, card),
       ),
+      sendDataCommandHandler,
     )
     .catch((error) => console.error("[lark] 无法建立卡片回调长连接", error));
 } else if (!larkService) {

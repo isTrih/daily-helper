@@ -382,4 +382,91 @@ describe("折叠按钮组回调", () => {
     expect(response.toast).toEqual({ type: "success", content: "日报卡片已撤回" });
     expect(response.card).toBeUndefined();
   });
+
+  test("有消息更新能力时立即返回加载卡并在后台写入最终卡片", async () => {
+    let resolveReports!: (reports: PeriodReport[]) => void;
+    const pendingReports = new Promise<PeriodReport[]>((resolve) => {
+      resolveReports = resolve;
+    });
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async () => pendingReports,
+    };
+    const updates: Array<{ messageId: string; json: string }> = [];
+    const handler = createCardActionHandler(
+      reportService as never,
+      "Asia/Shanghai",
+      {},
+      {},
+      undefined,
+      async (messageId, card) => {
+        updates.push({ messageId, json: JSON.stringify(card) });
+      },
+    );
+
+    const response = await handler({
+      context: { open_message_id: "om_async_report" },
+      action: {
+        tag: "overflow",
+        option: "rank_yesterday",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+        },
+      },
+    });
+
+    expect(response.toast).toEqual({ type: "info", content: "正在更新日报" });
+    expect(JSON.stringify(response.card?.data)).toContain("日报更新中");
+    expect(updates).toHaveLength(0);
+
+    resolveReports([makeReport(periods[0]!)]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.messageId).toBe("om_async_report");
+    expect(updates[0]!.json).toContain("昨日 TOP · 视频播放");
+  });
+
+  test("后台取数失败时将加载卡替换为可重试的错误卡", async () => {
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async () => {
+        throw new Error("请求数据超时");
+      },
+    };
+    let updatedJson = "";
+    const handler = createCardActionHandler(
+      reportService as never,
+      "Asia/Shanghai",
+      {},
+      {},
+      undefined,
+      async (_messageId, card) => {
+        updatedJson = JSON.stringify(card);
+      },
+    );
+
+    const response = await handler({
+      context: { open_message_id: "om_failed_report" },
+      action: {
+        tag: "overflow",
+        option: "rank_today",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "period",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+        },
+      },
+    });
+    expect(JSON.stringify(response.card?.data)).toContain("日报更新中");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(updatedJson).toContain("日报更新失败");
+    expect(updatedJson).toContain("请求数据超时");
+    expect(updatedJson).toContain("重新加载");
+  });
 });

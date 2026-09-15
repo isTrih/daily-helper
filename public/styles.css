@@ -106,7 +106,17 @@ input[type="text"]:focus, select:focus { border-color: var(--green-2); box-shado
 .project-copy strong, .project-copy small { display: block; }
 .project-copy strong { font-size: 14px; }
 .project-copy small { color: var(--muted); font-size: 11px; margin-top: 4px; }
-.project-item:has(.project-check:not(:checked)) select { opacity: .45; }
+.project-item:has(.project-check:not(:checked)) .period-select { opacity: .45; }
+.period-select { position: relative; min-width: 0; }
+.period-select summary { display: flex; align-items: center; min-height: 42px; border: 1px solid var(--line); background: white; border-radius: 11px; padding: 9px 36px 9px 12px; cursor: pointer; list-style: none; font-size: 12px; }
+.period-select summary::-webkit-details-marker { display: none; }
+.period-select summary::after { content: "⌄"; position: absolute; right: 13px; color: var(--muted); font-size: 16px; }
+.period-select[open] summary { border-color: var(--green-2); box-shadow: 0 0 0 3px rgba(36,117,83,.1); }
+.period-select-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.period-options { position: absolute; z-index: 4; top: calc(100% + 6px); right: 0; width: min(360px, 80vw); max-height: 250px; overflow-y: auto; border: 1px solid var(--line); background: white; border-radius: 11px; padding: 7px; box-shadow: 0 14px 34px rgba(26,55,40,.16); }
+.period-options label { display: flex; align-items: flex-start; gap: 9px; padding: 9px; border-radius: 7px; cursor: pointer; font-size: 12px; line-height: 1.45; }
+.period-options label:hover { background: #f1f6f2; }
+.period-options input { margin-top: 2px; accent-color: var(--green-2); }
 
 .rank-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 24px; }
 .rank-switch legend { width: 100%; }
@@ -170,6 +180,6 @@ input[type="text"]:focus, select:focus { border-color: var(--green-2); box-shado
   .choice-list, .segmented { grid-template-columns: 1fr; }
   .manual-chat { grid-template-columns: 1fr; gap: 7px; }
   .project-item { grid-template-columns: auto 1fr; }
-  .project-item select { grid-column: 2; }
+  .project-item .period-select { grid-column: 2; }
   .composer, .dispatch { padding: 22px; border-radius: 19px; }
 }

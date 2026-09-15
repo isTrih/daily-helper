@@ -39,7 +39,7 @@ function report(period: ProjectPeriod): PeriodReport {
 }
 
 describe("ReportOrchestrator", () => {
-  test("单独日报生成无交互卡片", async () => {
+  test("单独日报只保留页脚折叠操作", async () => {
     const reportService = {
       listPeriods: async () => periods,
       buildReports: async (ids: number[]) => ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!)),
@@ -68,11 +68,17 @@ describe("ReportOrchestrator", () => {
       img_key: "img_v2_one",
     });
     for (const card of cards) {
-      expect((card.config as Record<string, unknown>).update_multi).toBeUndefined();
+      expect((card.config as Record<string, unknown>).update_multi).toBe(true);
       expect((card.config as Record<string, unknown>).enable_forward).toBe(true);
       expect((card.config as Record<string, unknown>).enable_forward_interaction).toBe(true);
-      expect(JSON.stringify(card)).not.toContain('"callback"');
-      expect(JSON.stringify(card)).toContain('"tag":"chart"');
+      const json = JSON.stringify(card);
+      expect(json).toContain('"callback"');
+      expect(json).toContain('"element_id":"card_tools"');
+      expect(json).toContain("收起卡片");
+      expect(json).toContain("撤回卡片");
+      expect(json).not.toContain('"tag":"select_static"');
+      expect(json).not.toContain('"element_id":"rank_today"');
+      expect(json).toContain('"tag":"chart"');
     }
   });
 
@@ -91,5 +97,79 @@ describe("ReportOrchestrator", () => {
     });
     expect((card!.config as Record<string, unknown>).enable_forward).toBe(false);
     expect((card!.config as Record<string, unknown>).enable_forward_interaction).toBe(false);
+  });
+
+  test("多合一日报可将同一项目的两个期次直接放在一张卡中", async () => {
+    const earlierPeriod: ProjectPeriod = {
+      ...periods[0]!,
+      activityPeriodId: 9,
+      period: "项目 1 上一期日报",
+      isLatest: false,
+    };
+    const availablePeriods = [periods[0]!, earlierPeriod, periods[1]!];
+    let builtIds: number[] = [];
+    const reportService = {
+      listPeriods: async () => availablePeriods,
+      buildReports: async (ids: number[]) => {
+        builtIds = ids;
+        return ids.map((id) => report(availablePeriods.find((item) => item.activityPeriodId === id)!));
+      },
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const [card] = await orchestrator.createCards({
+      periodIds: [10, 9],
+      mode: "combined",
+      rankingMode: "today",
+    });
+    const json = JSON.stringify(card);
+
+    expect(builtIds).toEqual([10, 9]);
+    expect((card!.header as { title: { content: string } }).title.content).toBe("项目 1 · 多期速览");
+    expect(json).toContain("项目 1 日报");
+    expect(json).toContain("项目 1 上一期日报");
+    expect(json).toContain("全部期次");
+  });
+
+  test("同一项目不能同时选择三个期次", async () => {
+    const availablePeriods = [8, 9, 10].map((activityPeriodId) => ({
+      ...periods[0]!,
+      activityPeriodId,
+      period: `项目 1 第 ${activityPeriodId} 期`,
+      isLatest: activityPeriodId === 10,
+    }));
+    const reportService = {
+      listPeriods: async () => availablePeriods,
+      buildReports: async () => [],
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+
+    await expect(orchestrator.createCards({
+      periodIds: [8, 9, 10],
+      mode: "combined",
+      rankingMode: "today",
+    })).rejects.toThrow("最多可同时选择两个期次");
+  });
+
+  test("项目指令可直接展开多个项目的多合一卡片", async () => {
+    let builtIds: number[] = [];
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async (ids: number[]) => {
+        builtIds = ids;
+        return ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!));
+      },
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const [card] = await orchestrator.createCards({
+      periodIds: [10, 20],
+      mode: "combined",
+      rankingMode: "today",
+      showAllSelected: true,
+    });
+
+    expect(builtIds).toEqual([10, 20]);
+    expect((card!.header as { title: { content: string } }).title.content).toBe("项目每日速览");
+    expect(JSON.stringify(card)).toContain("项目 1 日报");
+    expect(JSON.stringify(card)).toContain("项目 2 日报");
   });
 });

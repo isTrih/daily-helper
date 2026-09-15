@@ -98,6 +98,8 @@ export interface CardViewState {
   enableForward?: boolean;
   enableForwardInteraction?: boolean;
   showTrend?: boolean;
+  controlsMode?: "full" | "tools";
+  interactiveExpiresAt?: string;
 }
 
 export type CardJson = Record<string, unknown>;
