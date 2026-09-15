@@ -119,7 +119,6 @@ describe("折叠按钮组回调", () => {
   test("收起和展开卡片时保留当前项目视图", async () => {
     const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
     const actionState = {
-      action: "card_tools",
       ranking_mode: "period",
       scope: "period",
       period_ids: "53,10",
@@ -127,14 +126,17 @@ describe("折叠按钮组回调", () => {
       return_view: "full",
     };
     const collapsed = await handler({
-      action: { tag: "overflow", option: "collapse_card", value: actionState },
+      action: { tag: "button", value: { ...actionState, action: "collapse_card" } },
     });
     expect(collapsed.toast?.content).toBe("卡片已收起");
     expect(JSON.stringify(collapsed.card?.data)).toContain("日报已收起");
     expect(JSON.stringify(collapsed.card?.data)).not.toContain("视频播放 Top 5");
 
     const expanded = await handler({
-      action: { tag: "overflow", option: "expand_card", value: { ...actionState, return_view: "collapsed" } },
+      action: {
+        tag: "button",
+        value: { ...actionState, action: "expand_card", return_view: "collapsed" },
+      },
     });
     expect(expanded.toast?.content).toBe("卡片已展开");
     expect(JSON.stringify(expanded.card?.data)).toContain("本期增长 · 视频播放 Top 5");
@@ -143,7 +145,6 @@ describe("折叠按钮组回调", () => {
   test("撤回先显示确认卡片，取消后恢复原视图", async () => {
     const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
     const actionState = {
-      action: "card_tools",
       ranking_mode: "today",
       scope: "period",
       period_ids: "53,10",
@@ -151,7 +152,7 @@ describe("折叠按钮组回调", () => {
       return_view: "collapsed",
     };
     const confirmation = await handler({
-      action: { tag: "overflow", option: "request_recall", value: actionState },
+      action: { tag: "button", value: { ...actionState, action: "request_recall" } },
     });
     expect(confirmation.toast?.content).toBe("请确认是否撤回");
     expect(JSON.stringify(confirmation.card?.data)).toContain("撤回确认");
@@ -164,6 +165,25 @@ describe("折叠按钮组回调", () => {
     });
     expect(cancelled.toast?.content).toBe("已取消撤回");
     expect(JSON.stringify(cancelled.card?.data)).toContain("日报已收起");
+  });
+
+  test("项目切换返回的卡片不包含不兼容的 overflow 组件", async () => {
+    const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
+    const response = await handler({
+      action: {
+        tag: "select_static",
+        option: "10",
+        value: {
+          action: "select_period",
+          ranking_mode: "today",
+          period_ids: "53,10",
+        },
+      },
+    });
+    const json = JSON.stringify(response.card?.data);
+    expect(response.toast?.type).toBe("success");
+    expect(json).not.toContain('"tag":"overflow"');
+    expect(json).toContain('"action":"open_card_tools"');
   });
 
   test("确认撤回时使用回调消息 ID 且不再返回替换卡片", async () => {

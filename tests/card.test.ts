@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildCollapsedReportCard, buildRecallConfirmationCard, buildReportCard } from "../src/card.ts";
+import {
+  buildCardToolsCard,
+  buildCollapsedReportCard,
+  buildRecallConfirmationCard,
+  buildReportCard,
+} from "../src/card.ts";
 import type { PeriodReport, ProjectPeriod } from "../src/types.ts";
 
 const periods: ProjectPeriod[] = [
@@ -140,9 +145,9 @@ describe("buildReportCard", () => {
     expect(json).toContain('"show_name":true');
     expect(json).toContain('"style":"capsule"');
     expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
-    expect(json).toContain('"tag":"overflow"');
-    expect(json).toContain("收起卡片");
-    expect(json).toContain("撤回卡片");
+    expect(json).not.toContain('"tag":"overflow"');
+    expect(json).toContain('"action":"open_card_tools"');
+    expect(json).toContain('"content":"管理"');
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -232,10 +237,24 @@ describe("buildReportCard", () => {
       img_key: "img_v2_project_one",
     });
     expect(json).toContain("日报已收起");
-    expect(json).toContain("展开卡片");
-    expect(json).toContain("撤回卡片");
+    expect(json).toContain('"action":"open_card_tools"');
+    expect(json).not.toContain('"tag":"overflow"');
     expect(json).not.toContain("今日视频播放");
     expect(json).not.toContain("视频播放 Top 5");
+  });
+
+  test("卡片管理页使用普通按钮提供收起、撤回和返回操作", () => {
+    const card = buildCardToolsCard({
+      reports: [report(periods[0]!)],
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      returnView: "full",
+    });
+    const json = JSON.stringify(card);
+    expect((card.header as { title: { content: string } }).title.content).toBe("卡片管理");
+    expect(json).toContain("收起卡片");
+    expect(json).toContain("撤回卡片");
+    expect(json).toContain("返回日报");
+    expect(json).not.toContain('"tag":"overflow"');
   });
 
   test("撤回确认卡片提供确认和取消操作并保留返回视图", () => {

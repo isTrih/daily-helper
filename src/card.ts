@@ -158,7 +158,7 @@ export function buildReportCard(args: {
               tag: "column",
               width: "auto",
               vertical_align: "center",
-              elements: [cardTools(state, "full")],
+              elements: [cardToolsButton(state, "full")],
             },
           ]
         : []),
@@ -238,7 +238,7 @@ export function buildCollapsedReportCard(args: {
               tag: "column",
               width: "auto",
               vertical_align: "center",
-              elements: [cardTools(state, "collapsed")],
+              elements: [cardToolsButton(state, "collapsed")],
             },
           ],
         },
@@ -308,6 +308,72 @@ export function buildRecallConfirmationCard(args: {
   };
 }
 
+export function buildCardToolsCard(args: {
+  reports: PeriodReport[];
+  state: CardViewState;
+  returnView: "full" | "collapsed";
+  projectColors?: ProjectColors;
+  projectIcons?: ProjectIcons;
+}): CardJson {
+  const { reports, state, returnView } = args;
+  if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
+
+  const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {});
+  const actionState = { ...cardStateValue(state), return_view: returnView };
+  return {
+    schema: "2.0",
+    config: interactiveCardConfig(identity.title, identity.subtitle),
+    header: {
+      ...cardHeader(identity),
+      title: { tag: "plain_text", content: "卡片管理" },
+    },
+    body: {
+      direction: "vertical",
+      padding: "12px",
+      elements: [
+        {
+          tag: "column_set",
+          flex_mode: "trisect",
+          horizontal_spacing: "8px",
+          columns: [
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              elements: [
+                button(
+                  returnView === "full" ? "收起卡片" : "展开卡片",
+                  returnView === "full" ? "collapse_card" : "expand_card",
+                  {
+                    action: returnView === "full" ? "collapse_card" : "expand_card",
+                    ...actionState,
+                  },
+                ),
+              ],
+            },
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              elements: [
+                button("撤回卡片", "request_recall", { action: "request_recall", ...actionState }, false, "danger"),
+              ],
+            },
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              elements: [
+                button("返回日报", "cancel_card_tools", { action: "cancel_card_tools", ...actionState }),
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 function cardIdentity(
   reports: PeriodReport[],
   projectColors: ProjectColors,
@@ -351,26 +417,18 @@ function cardHeader(identity: ReturnType<typeof cardIdentity>): Record<string, u
   };
 }
 
-function cardTools(state: CardViewState, view: "full" | "collapsed"): CardElement {
+function cardToolsButton(state: CardViewState, view: "full" | "collapsed"): CardElement {
   return {
-    tag: "overflow",
+    tag: "button",
     element_id: view === "full" ? "card_tools" : "collapsed_tools",
+    type: "default",
     size: "small",
-    options: [
-      {
-        text: { tag: "plain_text", content: view === "full" ? "收起卡片" : "展开卡片" },
-        value: view === "full" ? "collapse_card" : "expand_card",
-      },
-      {
-        text: { tag: "plain_text", content: "撤回卡片" },
-        value: "request_recall",
-      },
-    ],
+    text: { tag: "plain_text", content: "管理" },
     behaviors: [
       {
         type: "callback",
         value: {
-          action: "card_tools",
+          action: "open_card_tools",
           ...cardStateValue(state),
           return_view: view,
         },
