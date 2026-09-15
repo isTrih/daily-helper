@@ -72,7 +72,7 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(response.card?.data)).toContain("[ROK]生态");
   });
 
-  test("本期增长选项覆盖当前排行模式", async () => {
+  test("本期 TOP 选项覆盖当前排行模式", async () => {
     const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
     const response = await handler({
       action: {
@@ -88,7 +88,7 @@ describe("折叠按钮组回调", () => {
       },
     });
     expect(response.toast?.type).toBe("success");
-    expect(JSON.stringify(response.card?.data)).toContain("本期增长 · 视频播放 Top 5");
+    expect(JSON.stringify(response.card?.data)).toContain("本期 TOP · 视频播放");
   });
 
   test("切换项目后继续使用环境变量颜色和图标", async () => {
@@ -126,20 +126,25 @@ describe("折叠按钮组回调", () => {
       return_view: "full",
     };
     const collapsed = await handler({
-      action: { tag: "button", value: { ...actionState, action: "collapse_card" } },
+      action: {
+        tag: "overflow",
+        option: "collapse_card",
+        value: { ...actionState, action: "card_tools" },
+      },
     });
     expect(collapsed.toast?.content).toBe("卡片已收起");
     expect(JSON.stringify(collapsed.card?.data)).toContain("日报已收起");
-    expect(JSON.stringify(collapsed.card?.data)).not.toContain("视频播放 Top 5");
+    expect(JSON.stringify(collapsed.card?.data)).not.toContain("TOP · 视频播放");
 
     const expanded = await handler({
       action: {
-        tag: "button",
-        value: { ...actionState, action: "expand_card", return_view: "collapsed" },
+        tag: "overflow",
+        option: "expand_card",
+        value: { ...actionState, action: "card_tools", return_view: "collapsed" },
       },
     });
     expect(expanded.toast?.content).toBe("卡片已展开");
-    expect(JSON.stringify(expanded.card?.data)).toContain("本期增长 · 视频播放 Top 5");
+    expect(JSON.stringify(expanded.card?.data)).toContain("本期 TOP · 视频播放");
   });
 
   test("撤回先显示确认卡片，取消后恢复原视图", async () => {
@@ -152,7 +157,11 @@ describe("折叠按钮组回调", () => {
       return_view: "collapsed",
     };
     const confirmation = await handler({
-      action: { tag: "button", value: { ...actionState, action: "request_recall" } },
+      action: {
+        tag: "overflow",
+        option: "request_recall",
+        value: { ...actionState, action: "card_tools" },
+      },
     });
     expect(confirmation.toast?.content).toBe("请确认是否撤回");
     expect(JSON.stringify(confirmation.card?.data)).toContain("撤回确认");
@@ -167,7 +176,7 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(cancelled.card?.data)).toContain("日报已收起");
   });
 
-  test("项目切换返回的卡片不包含不兼容的 overflow 组件", async () => {
+  test("项目切换返回符合文档字段的折叠按钮组", async () => {
     const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
     const response = await handler({
       action: {
@@ -182,8 +191,10 @@ describe("折叠按钮组回调", () => {
     });
     const json = JSON.stringify(response.card?.data);
     expect(response.toast?.type).toBe("success");
-    expect(json).not.toContain('"tag":"overflow"');
-    expect(json).toContain('"action":"open_card_tools"');
+    expect(json).toContain('"tag":"overflow"');
+    expect(json).toContain('"action":"card_tools"');
+    expect(json).toContain('"width":"default"');
+    expect(json).not.toContain('"element_id":"card_tools","size"');
   });
 
   test("确认撤回时使用回调消息 ID 且不再返回替换卡片", async () => {

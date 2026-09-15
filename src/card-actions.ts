@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  buildCardToolsCard,
-  buildCollapsedReportCard,
-  buildRecallConfirmationCard,
-  buildReportCard,
-} from "./card.ts";
+import { buildCollapsedReportCard, buildRecallConfirmationCard, buildReportCard } from "./card.ts";
 import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-service.ts";
 import { ReportService } from "./report-service.ts";
 import type { CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
@@ -15,6 +10,7 @@ const actionValueSchema = z.object({
     "show_latest",
     "set_ranking",
     "overflow_action",
+    "card_tools",
     "open_card_tools",
     "collapse_card",
     "expand_card",
@@ -54,6 +50,8 @@ export function createCardActionHandler(
       const action = actionValueSchema.parse(event.action?.value);
       const actionType: ActionType = action.action === "overflow_action"
         ? overflowAction(event.action?.option)
+        : action.action === "card_tools"
+          ? cardToolAction(event.action?.option)
         : action.action;
 
       if (actionType === "confirm_recall") {
@@ -112,32 +110,22 @@ export function createCardActionHandler(
       }
 
       const reports = await reportService.buildReports(reportPeriodIds, state.rankingMode);
-      const card = actionType === "open_card_tools"
-        ? buildCardToolsCard({
-            reports,
-            state,
-            returnView: action.return_view ?? "full",
-            projectColors,
-            projectIcons,
-          })
-        : actionType === "collapse_card"
+      const card = actionType === "collapse_card"
         ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
         : actionType === "request_recall"
           ? buildRecallConfirmationCard({ reports, state, returnView: action.return_view ?? "full" })
-          : (actionType === "cancel_recall" || actionType === "cancel_card_tools") &&
+          : (actionType === "cancel_recall" || actionType === "cancel_card_tools" || actionType === "open_card_tools") &&
               action.return_view === "collapsed"
             ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
             : buildReportCard({ reports, allPeriods, state, timezone, projectColors, projectIcons });
-      const toast = actionType === "open_card_tools"
-        ? { type: "info" as const, content: "卡片管理" }
-        : actionType === "collapse_card"
+      const toast = actionType === "collapse_card"
         ? { type: "success" as const, content: "卡片已收起" }
         : actionType === "expand_card"
           ? { type: "success" as const, content: "卡片已展开" }
           : actionType === "request_recall"
             ? { type: "warning" as const, content: "请确认是否撤回" }
-            : actionType === "cancel_recall" || actionType === "cancel_card_tools"
-              ? { type: "info" as const, content: actionType === "cancel_recall" ? "已取消撤回" : "已返回日报" }
+            : actionType === "cancel_recall" || actionType === "cancel_card_tools" || actionType === "open_card_tools"
+              ? { type: "info" as const, content: actionType === "cancel_recall" ? "已取消撤回" : "卡片操作已更新" }
               : { type: "success" as const, content: "日报视图已更新" };
       return {
         toast,
@@ -153,6 +141,11 @@ export function createCardActionHandler(
       };
     }
   };
+}
+
+function cardToolAction(value: string | undefined): "collapse_card" | "expand_card" | "request_recall" {
+  if (value === "collapse_card" || value === "expand_card" || value === "request_recall") return value;
+  throw new Error("卡片管理操作无效");
 }
 
 function overflowAction(value: string | undefined): "show_latest" | "set_ranking" {

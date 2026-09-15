@@ -152,16 +152,6 @@ export function buildReportCard(args: {
           },
         ],
       },
-      ...(interactive
-        ? [
-            {
-              tag: "column",
-              width: "auto",
-              vertical_align: "center",
-              elements: [cardToolsButton(state, "full")],
-            },
-          ]
-        : []),
     ],
   });
 
@@ -238,7 +228,7 @@ export function buildCollapsedReportCard(args: {
               tag: "column",
               width: "auto",
               vertical_align: "center",
-              elements: [cardToolsButton(state, "collapsed")],
+              elements: [cardToolsOverflow(state, "collapsed")],
             },
           ],
         },
@@ -308,72 +298,6 @@ export function buildRecallConfirmationCard(args: {
   };
 }
 
-export function buildCardToolsCard(args: {
-  reports: PeriodReport[];
-  state: CardViewState;
-  returnView: "full" | "collapsed";
-  projectColors?: ProjectColors;
-  projectIcons?: ProjectIcons;
-}): CardJson {
-  const { reports, state, returnView } = args;
-  if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
-
-  const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {});
-  const actionState = { ...cardStateValue(state), return_view: returnView };
-  return {
-    schema: "2.0",
-    config: interactiveCardConfig(identity.title, identity.subtitle),
-    header: {
-      ...cardHeader(identity),
-      title: { tag: "plain_text", content: "卡片管理" },
-    },
-    body: {
-      direction: "vertical",
-      padding: "12px",
-      elements: [
-        {
-          tag: "column_set",
-          flex_mode: "trisect",
-          horizontal_spacing: "8px",
-          columns: [
-            {
-              tag: "column",
-              width: "weighted",
-              weight: 1,
-              elements: [
-                button(
-                  returnView === "full" ? "收起卡片" : "展开卡片",
-                  returnView === "full" ? "collapse_card" : "expand_card",
-                  {
-                    action: returnView === "full" ? "collapse_card" : "expand_card",
-                    ...actionState,
-                  },
-                ),
-              ],
-            },
-            {
-              tag: "column",
-              width: "weighted",
-              weight: 1,
-              elements: [
-                button("撤回卡片", "request_recall", { action: "request_recall", ...actionState }, false, "danger"),
-              ],
-            },
-            {
-              tag: "column",
-              width: "weighted",
-              weight: 1,
-              elements: [
-                button("返回日报", "cancel_card_tools", { action: "cancel_card_tools", ...actionState }),
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  };
-}
-
 function cardIdentity(
   reports: PeriodReport[],
   projectColors: ProjectColors,
@@ -417,18 +341,26 @@ function cardHeader(identity: ReturnType<typeof cardIdentity>): Record<string, u
   };
 }
 
-function cardToolsButton(state: CardViewState, view: "full" | "collapsed"): CardElement {
+function cardToolsOverflow(state: CardViewState, view: "full" | "collapsed"): CardElement {
   return {
-    tag: "button",
+    tag: "overflow",
     element_id: view === "full" ? "card_tools" : "collapsed_tools",
-    type: "default",
-    size: "small",
-    text: { tag: "plain_text", content: "管理" },
+    width: "default",
+    options: [
+      {
+        text: { tag: "plain_text", content: view === "full" ? "收起卡片" : "展开卡片" },
+        value: view === "full" ? "collapse_card" : "expand_card",
+      },
+      {
+        text: { tag: "plain_text", content: "撤回卡片" },
+        value: "request_recall",
+      },
+    ],
     behaviors: [
       {
         type: "callback",
         value: {
-          action: "open_card_tools",
+          action: "card_tools",
           ...cardStateValue(state),
           return_view: view,
         },
@@ -518,7 +450,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           weight: 1,
           padding: "8px 0",
           elements: [
-            button("今日增长", "rank_today", {
+            button("今日 TOP", "rank_today", {
               action: "set_ranking",
               ranking_mode: "today",
               ...actionState,
@@ -529,14 +461,21 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           tag: "column",
           width: "weighted",
           weight: 1,
-          padding: "8px 8px 8px 0",
+          padding: "8px 0",
           elements: [
-            button("本期增长", "rank_period", {
+            button("本期 TOP", "rank_period", {
               action: "set_ranking",
               ranking_mode: "period",
               ...actionState,
             }, state.rankingMode === "period"),
           ],
+        },
+        {
+          tag: "column",
+          width: "auto",
+          vertical_align: "center",
+          padding: "8px 8px 8px 0",
+          elements: [cardToolsOverflow(state, "full")],
         },
       ],
     },
@@ -579,14 +518,14 @@ function reportElements(
     highlightMetric(
       "▶ 今日视频播放",
       video.today.playCount,
-      `新增稿件 ${formatNumber(video.today.contentCount)}丨参与作者 ${formatNumber(video.today.authorCount)}`,
+      `新增稿件 ${formatNumber(video.today.contentCount)}\n参与作者 ${formatNumber(video.today.authorCount)}`,
       metricTones.video,
       true,
     ),
     highlightMetric(
       "昨日视频播放",
       video.yesterday.playCount,
-      `新增稿件 ${formatNumber(video.yesterday.contentCount)}丨参与作者 ${formatNumber(video.yesterday.authorCount)}`,
+      `新增稿件 ${formatNumber(video.yesterday.contentCount)}\n参与作者 ${formatNumber(video.yesterday.authorCount)}`,
       metricTones.content,
       true,
     ),
@@ -643,7 +582,7 @@ function reportElements(
         margin: "2px 0 6px 0",
         text: {
           tag: "lark_md",
-          content: `**本期累计**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}${hasLiveData ? `\n直播PV ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}` : ""}`,
+          content: `**本期累计数据**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}${hasLiveData ? `\n直播PV ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}` : ""}`,
           text_size: "notation",
         },
       },
@@ -654,6 +593,15 @@ function reportElements(
   return [
     ...headingElements,
     ...dailyMetrics,
+    {
+      tag: "div",
+      margin: "6px 0 0 0",
+      text: {
+        tag: "lark_md",
+        content: "**本期累计数据**",
+        text_size: "notation",
+      },
+    },
     {
       tag: "column_set",
       flex_mode: "bisect",
@@ -666,7 +614,7 @@ function reportElements(
       margin: "4px 0 2px 0",
       text: {
         tag: "lark_md",
-        content: `**${rankingMode === "today" ? "今日增长" : "本期增长"} · 视频播放 Top 5**`,
+        content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**`,
       },
     },
     ...topGrowthElements(video.topGrowth, timezone, rankingMode),
@@ -689,7 +637,7 @@ function highlightMetric(
       {
         tag: "interactive_container",
         width: "fill",
-        height: "82px",
+        height: "100px",
         direction: "vertical",
         background_style: tone.background,
         has_border: true,
@@ -720,7 +668,7 @@ function compactTopGrowthElement(
       tag: "div",
       text: {
         tag: "lark_md",
-        content: `**${rankingMode === "today" ? "今日增长" : "本期增长"} · 视频播放 Top 5**\n<font color='grey'>暂无播放增长数据</font>`,
+        content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
       },
     };
   }
@@ -739,7 +687,7 @@ function compactTopGrowthElement(
     tag: "div",
     text: {
       tag: "lark_md",
-      content: `**${rankingMode === "today" ? "今日增长" : "本期增长"} · 视频播放 Top 5**\n${rows.join("\n")}`,
+      content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**\n${rows.join("\n")}`,
     },
   };
 }

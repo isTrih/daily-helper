@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildCardToolsCard,
   buildCollapsedReportCard,
   buildRecallConfirmationCard,
   buildReportCard,
@@ -125,7 +124,7 @@ describe("buildReportCard", () => {
     expect(json).toContain("今日新增");
     expect(json).toContain("今日视频播放");
     expect(json).toContain("昨日视频播放");
-    expect(json).toContain("新增稿件 5丨参与作者 4");
+    expect(json).toContain("新增稿件 5\\n参与作者 4");
     expect(json).toContain("昨日开播");
     expect(json).toContain("统计区间 2026-09-01 — 2026-09-14");
     expect(json).not.toContain("今日增长与本期进度");
@@ -145,9 +144,12 @@ describe("buildReportCard", () => {
     expect(json).toContain('"show_name":true');
     expect(json).toContain('"style":"capsule"');
     expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
-    expect(json).not.toContain('"tag":"overflow"');
-    expect(json).toContain('"action":"open_card_tools"');
-    expect(json).toContain('"content":"管理"');
+    expect(json).toContain('"tag":"overflow"');
+    expect(json).toContain('"action":"card_tools"');
+    expect(json).toContain('"width":"default"');
+    expect(json).not.toContain('"element_id":"card_tools","size"');
+    expect(json).not.toContain('"content":"管理"');
+    expect(json.indexOf('"element_id":"card_tools"')).toBeLessThan(json.indexOf("有疑问找"));
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -167,7 +169,10 @@ describe("buildReportCard", () => {
     });
     expect(header.text_tag_list).toBeUndefined();
     const json = JSON.stringify(card);
-    expect(json).toContain("本期增长 · 视频播放 Top 5");
+    expect(json).toContain("本期 TOP · 视频播放");
+    expect(json).toContain("本期累计数据");
+    expect(json.indexOf("今日视频播放")).toBeLessThan(json.indexOf("本期累计数据"));
+    expect(json).toContain('"height":"100px"');
     expect(json).toContain("本期新增");
     expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
     expect(json).not.toContain("<font color='grey'>点赞</font>");
@@ -188,6 +193,8 @@ describe("buildReportCard", () => {
     expect(json).toContain('"action":"show_latest"');
     expect(json).toContain('"action":"set_ranking"');
     expect(json).toContain("所有项目");
+    expect(json).toContain("今日 TOP");
+    expect(json).toContain("本期 TOP");
   });
 
   test("超过四个项目时隐藏所有项目按钮", () => {
@@ -222,7 +229,7 @@ describe("buildReportCard", () => {
     expect(json).not.toContain("撤回卡片");
   });
 
-  test("收起卡片只保留标题、更新时间和管理菜单", () => {
+  test("收起卡片只保留标题、更新时间和折叠按钮组", () => {
     const card = buildCollapsedReportCard({
       reports: [report(periods[0]!)],
       state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
@@ -237,24 +244,12 @@ describe("buildReportCard", () => {
       img_key: "img_v2_project_one",
     });
     expect(json).toContain("日报已收起");
-    expect(json).toContain('"action":"open_card_tools"');
-    expect(json).not.toContain('"tag":"overflow"');
-    expect(json).not.toContain("今日视频播放");
-    expect(json).not.toContain("视频播放 Top 5");
-  });
-
-  test("卡片管理页使用普通按钮提供收起、撤回和返回操作", () => {
-    const card = buildCardToolsCard({
-      reports: [report(periods[0]!)],
-      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
-      returnView: "full",
-    });
-    const json = JSON.stringify(card);
-    expect((card.header as { title: { content: string } }).title.content).toBe("卡片管理");
-    expect(json).toContain("收起卡片");
+    expect(json).toContain('"action":"card_tools"');
+    expect(json).toContain('"tag":"overflow"');
+    expect(json).toContain("展开卡片");
     expect(json).toContain("撤回卡片");
-    expect(json).toContain("返回日报");
-    expect(json).not.toContain('"tag":"overflow"');
+    expect(json).not.toContain("今日视频播放");
+    expect(json).not.toContain("TOP · 视频播放");
   });
 
   test("撤回确认卡片提供确认和取消操作并保留返回视图", () => {
