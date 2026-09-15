@@ -158,7 +158,7 @@ export function buildReportCard(args: {
   return {
     schema: "2.0",
     config: {
-      update_multi: interactive,
+      ...(interactive ? { update_multi: true } : {}),
       enable_forward: false,
       enable_forward_interaction: false,
       summary: { content: `${title}｜${subtitle}` },
@@ -518,14 +518,14 @@ function reportElements(
     highlightMetric(
       "▶ 今日视频播放",
       video.today.playCount,
-      `新增稿件 ${formatNumber(video.today.contentCount)}\n参与作者 ${formatNumber(video.today.authorCount)}`,
+      `新增稿件 ${formatNumber(video.today.contentCount)}\n新增作者 ${formatNumber(video.today.authorCount)}`,
       metricTones.video,
       true,
     ),
     highlightMetric(
       "昨日视频播放",
       video.yesterday.playCount,
-      `新增稿件 ${formatNumber(video.yesterday.contentCount)}\n参与作者 ${formatNumber(video.yesterday.authorCount)}`,
+      `新增稿件 ${formatNumber(video.yesterday.contentCount)}\n新增作者 ${formatNumber(video.yesterday.authorCount)}`,
       metricTones.content,
       true,
     ),

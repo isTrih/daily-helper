@@ -124,7 +124,7 @@ describe("buildReportCard", () => {
     expect(json).toContain("今日新增");
     expect(json).toContain("今日视频播放");
     expect(json).toContain("昨日视频播放");
-    expect(json).toContain("新增稿件 5\\n参与作者 4");
+    expect(json).toContain("新增稿件 5\\n新增作者 4");
     expect(json).toContain("昨日开播");
     expect(json).toContain("统计区间 2026-09-01 — 2026-09-14");
     expect(json).not.toContain("今日增长与本期进度");
@@ -221,7 +221,7 @@ describe("buildReportCard", () => {
       interactive: false,
     });
     const json = JSON.stringify(card);
-    expect((card.config as Record<string, unknown>).update_multi).toBe(false);
+    expect((card.config as Record<string, unknown>).update_multi).toBeUndefined();
     expect(json).not.toContain('"callback"');
     expect(json).not.toContain('"select_static"');
     expect(json).not.toContain("所有项目");

@@ -49,7 +49,7 @@ describe("ReportOrchestrator", () => {
       img_key: "img_v2_one",
     });
     for (const card of cards) {
-      expect((card.config as Record<string, unknown>).update_multi).toBe(false);
+      expect((card.config as Record<string, unknown>).update_multi).toBeUndefined();
       expect(JSON.stringify(card)).not.toContain('"callback"');
     }
   });
