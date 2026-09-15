@@ -2,7 +2,7 @@ import { z } from "zod";
 import { buildReportCard } from "./card.ts";
 import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-service.ts";
 import { ReportService } from "./report-service.ts";
-import type { CardViewState, ProjectColors } from "./types.ts";
+import type { CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
 
 const actionValueSchema = z.object({
   action: z.enum(["select_period", "show_latest", "set_ranking", "overflow_action"]),
@@ -16,6 +16,7 @@ export function createCardActionHandler(
   reportService: ReportService,
   timezone: string,
   projectColors: ProjectColors = {},
+  projectIcons: ProjectIcons = {},
 ) {
   return async (event: LongConnectionCardActionEvent): Promise<CardActionResponse> => {
     try {
@@ -71,7 +72,7 @@ export function createCardActionHandler(
       }
 
       const reports = await reportService.buildReports(reportPeriodIds, state.rankingMode);
-      const card = buildReportCard({ reports, allPeriods, state, timezone, projectColors });
+      const card = buildReportCard({ reports, allPeriods, state, timezone, projectColors, projectIcons });
       return {
         toast: { type: "success", content: "日报视图已更新" },
         card: { type: "raw", data: card },

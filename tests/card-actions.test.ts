@@ -91,11 +91,12 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(response.card?.data)).toContain("本期增长 · 视频播放 Top 5");
   });
 
-  test("切换项目后继续使用环境变量颜色", async () => {
+  test("切换项目后继续使用环境变量颜色和图标", async () => {
     const handler = createCardActionHandler(
       fakeReportService as never,
       "Asia/Shanghai",
       { 1: "red" },
+      { 1: "img_v2_rok" },
     );
     const response = await handler({
       action: {
@@ -109,5 +110,9 @@ describe("折叠按钮组回调", () => {
       },
     });
     expect((response.card?.data.header as Record<string, unknown>).template).toBe("red");
+    expect((response.card?.data.header as Record<string, unknown>).icon).toEqual({
+      tag: "custom_icon",
+      img_key: "img_v2_rok",
+    });
   });
 });

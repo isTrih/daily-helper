@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CardColor, ProjectColors } from "./types.ts";
+import type { CardColor, ProjectColors, ProjectIcons } from "./types.ts";
 
 const cardColors = new Set<CardColor>([
   "blue",
@@ -30,6 +30,7 @@ const envSchema = z.object({
   XINGTU_API_TOKEN: z.string().trim().optional(),
   PROJECT_ORDER: z.string().trim().default(""),
   COLOR: z.string().trim().default(""),
+  ICON: z.string().trim().default(""),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   AUTO_DAILY_REPORT_ENABLED: booleanFromEnv,
@@ -57,6 +58,15 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     }
     return colors;
   }, {});
+  const projectIcons = parsed.ICON.split(",").reduce<ProjectIcons>((icons, entry) => {
+    const match = /^(\d+)\s*-\s*([^\s,]+)$/.exec(entry.trim());
+    if (!match) return icons;
+    const projectId = Number(match[1]);
+    if (projectId > 0 && Number.isSafeInteger(projectId)) {
+      icons[projectId] = match[2]!;
+    }
+    return icons;
+  }, {});
 
   return {
     host: parsed.HOST,
@@ -67,6 +77,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     },
     projectOrder,
     projectColors,
+    projectIcons,
     lark: {
       appId: parsed.LARK_APP_ID || undefined,
       appSecret: parsed.LARK_APP_SECRET || undefined,

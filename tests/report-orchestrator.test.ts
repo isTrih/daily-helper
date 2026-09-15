@@ -33,6 +33,7 @@ describe("ReportOrchestrator", () => {
       undefined,
       "Asia/Shanghai",
       { 1: "red", 2: "orange" },
+      { 1: "img_v2_one", 2: "img_v2_two" },
     );
     const cards = await orchestrator.createCards({
       periodIds: periods.map((item) => item.activityPeriodId),
@@ -43,6 +44,10 @@ describe("ReportOrchestrator", () => {
     expect(cards).toHaveLength(2);
     expect((cards[0]!.header as Record<string, unknown>).template).toBe("red");
     expect((cards[1]!.header as Record<string, unknown>).template).toBe("orange");
+    expect((cards[0]!.header as Record<string, unknown>).icon).toEqual({
+      tag: "custom_icon",
+      img_key: "img_v2_one",
+    });
     for (const card of cards) {
       expect((card.config as Record<string, unknown>).update_multi).toBe(false);
       expect(JSON.stringify(card)).not.toContain('"callback"');

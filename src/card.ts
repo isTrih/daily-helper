@@ -1,4 +1,12 @@
-import type { CardColor, CardJson, CardViewState, PeriodReport, ProjectColors, ProjectPeriod } from "./types.ts";
+import type {
+  CardColor,
+  CardJson,
+  CardViewState,
+  PeriodReport,
+  ProjectColors,
+  ProjectIcons,
+  ProjectPeriod,
+} from "./types.ts";
 
 type CardElement = Record<string, unknown>;
 
@@ -59,6 +67,7 @@ export function buildReportCard(args: {
   timezone?: string;
   interactive?: boolean;
   projectColors?: ProjectColors;
+  projectIcons?: ProjectIcons;
 }): CardJson {
   const { reports, allPeriods, state } = args;
   if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
@@ -66,9 +75,11 @@ export function buildReportCard(args: {
   const timezone = args.timezone ?? "Asia/Shanghai";
   const interactive = args.interactive ?? true;
   const projectColors = args.projectColors ?? {};
+  const projectIcons = args.projectIcons ?? {};
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
   const isCombined = state.scope === "combined" && reports.length > 1;
   const theme = focusedReport ? colorFor(focusedReport.period.projectId, projectColors) : "blue";
+  const iconKey = focusedReport ? projectIcons[focusedReport.period.projectId] : undefined;
   const title = focusedReport ? focusedReport.period.period : "项目每日速览";
   const subtitle = `统计区间 ${reports[0]!.range.from} — ${reports[0]!.range.to}`;
   const tags = (isCombined ? reports.slice(0, 3) : []).map((report) => ({
@@ -88,14 +99,45 @@ export function buildReportCard(args: {
   }
 
   elements.push({
-    tag: "div",
+    tag: "column_set",
+    flex_mode: "none",
+    horizontal_align: "right",
+    horizontal_spacing: "6px",
     margin: "10px 0 0 0",
-    text: {
-      tag: "lark_md",
-      content: `<font color='grey'>更新于 ${formatTimestamp(timezone)}</font>`,
-      text_size: "notation",
-      text_align: "right",
-    },
+    columns: [
+      {
+        tag: "column",
+        width: "auto",
+        vertical_align: "center",
+        elements: [
+          {
+            tag: "div",
+            text: {
+              tag: "lark_md",
+              content: `<font color='grey'>更新于 ${formatTimestamp(timezone)}　有疑问找</font>`,
+              text_size: "notation",
+              text_align: "right",
+            },
+          },
+        ],
+      },
+      {
+        tag: "column",
+        width: "auto",
+        vertical_align: "center",
+        elements: [
+          {
+            tag: "person",
+            element_id: "report_contact",
+            size: "extra_small",
+            user_id: "ou_c909863fbf86e93840200f4d30a2229c",
+            show_avatar: true,
+            show_name: true,
+            style: "capsule",
+          },
+        ],
+      },
+    ],
   });
 
   return {
@@ -113,7 +155,9 @@ export function buildReportCard(args: {
       title: { tag: "plain_text", content: title },
       subtitle: { tag: "plain_text", content: subtitle },
       ...(tags.length > 0 ? { text_tag_list: tags } : {}),
-      icon: { tag: "standard_icon", token: "chart-pie_outlined" },
+      icon: iconKey
+        ? { tag: "custom_icon", img_key: iconKey }
+        : { tag: "standard_icon", token: "chart-pie_outlined" },
       padding: "12px",
     },
     body: {
@@ -271,18 +315,16 @@ function reportElements(
     ),
     dailyMetricRow(
       highlightMetric(
-        "◉ 今日直播曝光",
-        live.today.liveExposurePv,
-        `场次 ${formatNumber(live.today.liveSessionCount)} · 主播 ${formatNumber(live.today.anchorCount)}`,
+        "◉ 今日新增直播",
+        `${formatNumber(live.today.liveSessionCount)} 场`,
+        `${formatNumber(live.today.anchorCount)} 位主播`,
         metricTones.live,
-        true,
       ),
       highlightMetric(
-        "昨日直播曝光",
-        live.yesterday.liveExposurePv,
-        `场次 ${formatNumber(live.yesterday.liveSessionCount)} · 主播 ${formatNumber(live.yesterday.anchorCount)}`,
+        "昨日新增直播",
+        `${formatNumber(live.yesterday.liveSessionCount)} 场`,
+        `${formatNumber(live.yesterday.anchorCount)} 位主播`,
         metricTones.live,
-        true,
       ),
     ),
   ];
@@ -296,7 +338,7 @@ function reportElements(
         margin: "2px 0 6px 0",
         text: {
           tag: "lark_md",
-          content: `**本期累计**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}\n直播曝光 ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}`,
+          content: `**本期累计**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}\n直播PV ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}`,
           text_size: "notation",
         },
       },
@@ -319,7 +361,7 @@ function reportElements(
           `${formatNumber(video.cumulative.contentCount)} / ${formatNumber(video.cumulative.authorCount)}`,
           metricTones.content,
         ),
-        summaryMetric("直播曝光", live.cumulative.liveExposurePv, metricTones.live),
+        summaryMetric("直播PV", live.cumulative.liveExposurePv, metricTones.live),
         summaryMetric(
           "场次 / 主播",
           `${formatNumber(live.cumulative.liveSessionCount)} / ${formatNumber(live.cumulative.anchorCount)}`,

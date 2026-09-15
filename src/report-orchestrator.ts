@@ -1,7 +1,7 @@
 import { buildReportCard } from "./card.ts";
 import { LarkService } from "./lark-service.ts";
 import { ReportService } from "./report-service.ts";
-import type { CardJson, ProjectColors, RankingMode, ReportMode } from "./types.ts";
+import type { CardJson, ProjectColors, ProjectIcons, RankingMode, ReportMode } from "./types.ts";
 
 export interface ReportRequest {
   periodIds: number[];
@@ -19,6 +19,7 @@ export class ReportOrchestrator {
     private readonly lark: LarkService | undefined,
     private readonly timezone: string,
     private readonly projectColors: ProjectColors = {},
+    private readonly projectIcons: ProjectIcons = {},
   ) {}
 
   async createCards(request: ReportRequest): Promise<CardJson[]> {
@@ -43,6 +44,7 @@ export class ReportOrchestrator {
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
+          projectIcons: this.projectIcons,
         }),
       ];
     }
@@ -54,6 +56,7 @@ export class ReportOrchestrator {
         allPeriods,
         interactive: false,
         projectColors: this.projectColors,
+        projectIcons: this.projectIcons,
         state: {
           scope: "period",
           periodIds: [report.period.activityPeriodId],

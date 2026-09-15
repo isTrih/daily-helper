@@ -14,6 +14,7 @@ export type CardColor =
   | "indigo"
   | "grey";
 export type ProjectColors = Record<number, CardColor>;
+export type ProjectIcons = Record<number, string>;
 
 export interface ProjectPeriod {
   activityPeriodId: number;

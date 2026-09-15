@@ -5,7 +5,7 @@
 ## 已实现
 
 - 默认按 `project_id` 分组，只取数值最大的 `activity_period_id`。多合一日报初始聚焦 `PROJECT_ORDER` 顺位第一个项目，点击“所有项目”后展开全部项目。
-- 同时展示本期累计与今日、昨日新增：视频播放、点赞、评论、稿件、作者，以及直播曝光、平均 ACU、场次、主播。
+- 本期累计展示视频播放、点赞、评论、稿件、作者，以及直播 PV、平均 ACU、场次、主播；今日与昨日新增展示视频数据和直播场次、主播，不计算直播 PV 日增。
 - 使用 `/api/v1/queries/videos/top-growth` 展示每项目 5 条今日或本期播放增长最快的视频。
 - 卡片 JSON 2.0，下拉框只列出每个项目最大的期次；“所有项目 / 今日增长 / 本期增长”在宽屏同排展示、窄屏自动换行。“所有项目”使用紧凑视图避免超过飞书组件上限，视频标题可点击打开抖音播放页，并通过 `card.action.trigger` 长连接在 3 秒内立即返回新卡片。
 - 网页读取当前机器人所在群聊，可配置多合一或单独日报、勾选项目、切换期次、预览并发送。
@@ -43,6 +43,7 @@ LARK_APP_SECRET=xxxxxxxxxxxxxxxx
 LARK_DEFAULT_CHAT_ID=oc_xxxxxxxxxxxxxxxx
 PROJECT_ORDER=3,1,2
 COLOR=1-yellow,2-purple,3-blue,4-orange
+ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 ```
 
 常用配置：
@@ -53,6 +54,7 @@ COLOR=1-yellow,2-purple,3-blue,4-orange
 | `XINGTU_API_TOKEN`             | 空                                    | 可选 Bearer Token                                     |
 | `PROJECT_ORDER`                | 空                                    | project_id 展示顺序，如 `3,1,2`；未列出的项目自动追加 |
 | `COLOR`                        | 空                                    | 项目主题色，如 `1-yellow,2-purple,3-blue`；支持 `blue`、`wathet`、`turquoise`、`green`、`yellow`、`orange`、`red`、`carmine`、`violet`、`purple`、`indigo`、`grey` |
+| `ICON`                         | 空                                    | 项目标题图标，如 `1-img_v2_xxx,2-img_v2_yyy`；值为飞书图片的 `img_key`，未配置时使用默认图标 |
 | `PORT` / `HOST`                | `3000` / `0.0.0.0`                    | 管理页监听地址                                        |
 | `LARK_LONG_CONNECTION_ENABLED` | `true`                                | 是否接收卡片长连接回调                                |
 | `AUTO_DAILY_REPORT_ENABLED`    | `true`                                | 是否启用自动日报                                      |

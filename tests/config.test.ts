@@ -17,3 +17,14 @@ test("COLOR 解析项目主题色并忽略无效配置", () => {
     4: "orange",
   });
 });
+
+test("ICON 解析项目标题图标并忽略无效配置", () => {
+  const config = readConfig({
+    ICON: "1-img_v2_first, 2-img_v2_second,2-img_v2_latest,0-img_invalid,invalid,3-hyphen-key",
+  });
+  expect(config.projectIcons).toEqual({
+    1: "img_v2_first",
+    2: "img_v2_latest",
+    3: "hyphen-key",
+  });
+});

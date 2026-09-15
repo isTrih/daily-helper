@@ -18,6 +18,7 @@ const orchestrator = new ReportOrchestrator(
   larkService,
   config.schedule.timezone,
   config.projectColors,
+  config.projectIcons,
 );
 const server = startServer({
   config,
@@ -30,7 +31,9 @@ let scheduledJob: Cron | undefined;
 
 if (larkService && config.lark.longConnectionEnabled) {
   larkService
-    .startCardActionConnection(createCardActionHandler(reportService, config.schedule.timezone, config.projectColors))
+    .startCardActionConnection(
+      createCardActionHandler(reportService, config.schedule.timezone, config.projectColors, config.projectIcons),
+    )
     .catch((error) => console.error("[lark] 无法建立卡片回调长连接", error));
 } else if (!larkService) {
   console.warn("[lark] 未配置应用凭证；网页预览可用，群聊读取、发送和长连接已停用");

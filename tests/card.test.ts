@@ -97,13 +97,24 @@ describe("buildReportCard", () => {
     expect(json).not.toContain("221,400");
     expect(json).toContain("今日新增");
     expect(json).toContain("昨日视频新增");
-    expect(json).toContain("昨日直播曝光");
+    expect(json).toContain("昨日新增直播");
     expect(json).toContain("统计区间 2026-09-01 — 2026-09-14");
     expect(json).not.toContain("今日增长与本期进度");
     expect(json).not.toContain("<text_align");
     expect(json).not.toContain("视频排行范围");
-    expect(json).toContain("今日直播曝光");
-    expect(json).toContain("场次 3 · 主播 2");
+    expect(json).toContain("今日新增直播");
+    expect(json).toContain("3 场");
+    expect(json).toContain("2 位主播");
+    expect(json).toContain("直播PV 1.2w");
+    expect(json).not.toContain("直播曝光");
+    expect(json).not.toContain("**+900**");
+    expect(json).not.toContain("**+750**");
+    expect(json).toContain("有疑问找");
+    expect(json).toContain('"tag":"person"');
+    expect(json).toContain('"size":"extra_small"');
+    expect(json).toContain('"user_id":"ou_c909863fbf86e93840200f4d30a2229c"');
+    expect(json).toContain('"show_name":true');
+    expect(json).toContain('"style":"capsule"');
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -193,5 +204,29 @@ describe("buildReportCard", () => {
     expect(json).toContain("<text_tag color='orange'>");
     expect(json).toContain('"color":"red"');
     expect(json).toContain('"color":"orange"');
+  });
+
+  test("单项目使用配置的标题图标，多项目总览保留默认图标", () => {
+    const singleCard = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      projectIcons: { 1: "img_v2_project_one" },
+    });
+    expect((singleCard.header as Record<string, unknown>).icon).toEqual({
+      tag: "custom_icon",
+      img_key: "img_v2_project_one",
+    });
+
+    const combinedCard = buildReportCard({
+      reports: periods.map(report),
+      allPeriods: periods,
+      state: { scope: "combined", periodIds: [10, 11], rankingMode: "today" },
+      projectIcons: { 1: "img_v2_project_one", 2: "img_v2_project_two" },
+    });
+    expect((combinedCard.header as Record<string, unknown>).icon).toEqual({
+      tag: "standard_icon",
+      token: "chart-pie_outlined",
+    });
   });
 });
