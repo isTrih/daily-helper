@@ -559,37 +559,44 @@ function reportElements(
   const { period, video, live } = report;
   const hasLiveData = hasCumulativeLiveData(live.cumulative);
   const color = colorFor(period.projectId, projectColors);
+  const useYesterdayWindow = rankingMode === "yesterday";
+  const primaryDay = useYesterdayWindow ? "昨日" : "今日";
+  const comparisonDay = useYesterdayWindow ? "前日" : "昨日";
+  const primaryVideo = useYesterdayWindow ? video.yesterday : video.today;
+  const comparisonVideo = useYesterdayWindow ? video.dayBefore : video.yesterday;
+  const primaryLive = useYesterdayWindow ? live.yesterday : live.today;
+  const comparisonLive = useYesterdayWindow ? live.dayBefore : live.yesterday;
   const heading = `<text_tag color='${color}'>${safeMarkdownText(period.projectDisplayName)}</text_tag> **${safeMarkdownText(period.period)}**`;
   const headingElements: CardElement[] = showHeading
     ? [{ tag: "div", text: { tag: "lark_md", content: heading, text_size: "heading" } }]
     : [];
   const dailyMetricColumns: CardElement[] = [
     highlightMetric(
-      "▶ 今日视频播放",
-      video.today.playCount,
-      `新增稿件 ${formatNumber(video.today.contentCount)}\n新增作者 ${formatNumber(video.today.authorCount)}`,
+      `▶ ${primaryDay}视频播放`,
+      primaryVideo.playCount,
+      `新增稿件 ${formatNumber(primaryVideo.contentCount)}\n新增作者 ${formatNumber(primaryVideo.authorCount)}`,
       metricTones.video,
       true,
     ),
     highlightMetric(
-      "昨日视频播放",
-      video.yesterday.playCount,
-      `新增稿件 ${formatNumber(video.yesterday.contentCount)}\n新增作者 ${formatNumber(video.yesterday.authorCount)}`,
+      `${comparisonDay}视频播放`,
+      comparisonVideo.playCount,
+      `新增稿件 ${formatNumber(comparisonVideo.contentCount)}\n新增作者 ${formatNumber(comparisonVideo.authorCount)}`,
       metricTones.content,
       true,
     ),
     ...(hasLiveData
       ? [
           highlightMetric(
-            "◉ 今日开播",
-            `${formatNumber(live.today.liveSessionCount)} 场`,
-            `参与主播 ${formatNumber(live.today.anchorCount)}`,
+            `◉ ${primaryDay}开播`,
+            `${formatNumber(primaryLive.liveSessionCount)} 场`,
+            `参与主播 ${formatNumber(primaryLive.anchorCount)}`,
             metricTones.live,
           ),
           highlightMetric(
-            "昨日开播",
-            `${formatNumber(live.yesterday.liveSessionCount)} 场`,
-            `参与主播 ${formatNumber(live.yesterday.anchorCount)}`,
+            `${comparisonDay}开播`,
+            `${formatNumber(comparisonLive.liveSessionCount)} 场`,
+            `参与主播 ${formatNumber(comparisonLive.anchorCount)}`,
             metricTones.activity,
           ),
         ]

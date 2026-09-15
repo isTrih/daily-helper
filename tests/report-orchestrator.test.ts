@@ -16,18 +16,25 @@ function report(period: ProjectPeriod): PeriodReport {
   const live = { liveExposurePv: 0, avgAcu: null, liveSessionCount: 0, anchorCount: 0 };
   return {
     period,
-    range: { from: "2026-09-01", to: "2026-09-15", today: "2026-09-15", yesterday: "2026-09-14" },
+    range: {
+      from: "2026-09-01",
+      to: "2026-09-15",
+      today: "2026-09-15",
+      yesterday: "2026-09-14",
+      dayBefore: "2026-09-13",
+    },
     video: {
       cumulative: video,
       today: video,
       yesterday: video,
+      dayBefore: video,
       topGrowth: [],
       trend: [
         { date: "2026-09-14", playCount: 10, contentCount: 1, authorCount: 1 },
         { date: "2026-09-15", playCount: 20, contentCount: 2, authorCount: 1 },
       ],
     },
-    live: { cumulative: live, today: live, yesterday: live },
+    live: { cumulative: live, today: live, yesterday: live, dayBefore: live },
   };
 }
 

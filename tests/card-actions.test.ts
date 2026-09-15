@@ -29,11 +29,13 @@ function makeReport(period: ProjectPeriod): PeriodReport {
       to: "2026-09-14",
       today: "2026-09-14",
       yesterday: "2026-09-13",
+      dayBefore: "2026-09-12",
     },
     video: {
       cumulative: { playCount: 100, likeCount: 10, commentCount: 2, contentCount: 3, authorCount: 2 },
       today: { playCount: 20, likeCount: 2, commentCount: 1, contentCount: 1, authorCount: 1 },
       yesterday: { playCount: 15, likeCount: 1, commentCount: 1, contentCount: 1, authorCount: 1 },
+      dayBefore: { playCount: 10, likeCount: 1, commentCount: 0, contentCount: 1, authorCount: 1 },
       topGrowth: [],
       trend: [
         { date: "2026-09-13", playCount: 15, contentCount: 1, authorCount: 1 },
@@ -44,6 +46,7 @@ function makeReport(period: ProjectPeriod): PeriodReport {
       cumulative: { liveExposurePv: 200, avgAcu: 3, liveSessionCount: 4, anchorCount: 2 },
       today: { liveExposurePv: 0, avgAcu: null, liveSessionCount: 1, anchorCount: 1 },
       yesterday: { liveExposurePv: 50, avgAcu: 2, liveSessionCount: 1, anchorCount: 1 },
+      dayBefore: { liveExposurePv: 40, avgAcu: 2, liveSessionCount: 1, anchorCount: 1 },
     },
   };
 }

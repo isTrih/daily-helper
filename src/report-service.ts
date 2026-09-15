@@ -65,6 +65,7 @@ export class ReportService {
     const today = dateInTimezone(this.timezone);
     const yesterday = previousIsoDate(today);
     const dayBeforeYesterday = previousIsoDate(yesterday);
+    const twoDaysBeforeYesterday = previousIsoDate(dayBeforeYesterday);
     const from = period.trackingStartDate ?? period.taskMonth ?? today;
     const configuredEnd = period.trackingEndDate ?? today;
     const to = today < from ? from : minIsoDate(today, configuredEnd);
@@ -91,6 +92,7 @@ export class ReportService {
     const videoTodayPromise = getDailyVideo(today);
     const videoYesterdayPromise = getDailyVideo(yesterday);
     const videoDayBeforeYesterdayPromise = getDailyVideo(dayBeforeYesterday);
+    const videoTwoDaysBeforeYesterdayPromise = getDailyVideo(twoDaysBeforeYesterday);
     const topGrowthPromise = videoConfig
       ? this.client.getTopGrowth(
           videoConfig.contentConfigId,
@@ -111,6 +113,9 @@ export class ReportService {
     const liveYesterdayPromise = liveConfig
       ? this.client.getLiveSummary(liveConfig.contentConfigId, { date: yesterday })
       : Promise.resolve(emptyLiveSummary());
+    const liveDayBeforeYesterdayPromise = liveConfig
+      ? this.client.getLiveSummary(liveConfig.contentConfigId, { date: dayBeforeYesterday })
+      : Promise.resolve(emptyLiveSummary());
     const videoTrendPromise = includeTrend && videoConfig
       ? buildVideoTrend(from, to, getDailyVideo)
       : Promise.resolve([]);
@@ -120,34 +125,44 @@ export class ReportService {
       videoToday,
       videoYesterday,
       videoDayBeforeYesterday,
+      videoTwoDaysBeforeYesterday,
       topGrowth,
       liveCumulative,
       liveToday,
       liveYesterday,
+      liveDayBeforeYesterday,
       videoTrend,
     ] = await Promise.all([
       videoCumulativePromise,
       videoTodayPromise,
       videoYesterdayPromise,
       videoDayBeforeYesterdayPromise,
+      videoTwoDaysBeforeYesterdayPromise,
       topGrowthPromise,
       liveCumulativePromise,
       liveTodayPromise,
       liveYesterdayPromise,
+      liveDayBeforeYesterdayPromise,
       videoTrendPromise,
     ]);
 
     const value: PeriodReport = {
       period,
-      range: { from, to, today, yesterday },
+      range: { from, to, today, yesterday, dayBefore: dayBeforeYesterday },
       video: {
         cumulative: videoCumulative,
         today: withVideoCountDeltas(videoToday, videoYesterday),
         yesterday: withVideoCountDeltas(videoYesterday, videoDayBeforeYesterday),
+        dayBefore: withVideoCountDeltas(videoDayBeforeYesterday, videoTwoDaysBeforeYesterday),
         topGrowth,
         trend: videoTrend,
       },
-      live: { cumulative: liveCumulative, today: liveToday, yesterday: liveYesterday },
+      live: {
+        cumulative: liveCumulative,
+        today: liveToday,
+        yesterday: liveYesterday,
+        dayBefore: liveDayBeforeYesterday,
+      },
     };
     this.reportCache.set(cacheKey, { value, expiresAt: Date.now() + this.cacheTtlMs });
     return value;

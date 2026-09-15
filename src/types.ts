@@ -73,11 +73,12 @@ export interface VideoTrendPoint {
 
 export interface PeriodReport {
   period: ProjectPeriod;
-  range: { from: string; to: string; today: string; yesterday: string };
+  range: { from: string; to: string; today: string; yesterday: string; dayBefore: string };
   video: {
     cumulative: VideoSummary;
     today: VideoSummary;
     yesterday: VideoSummary;
+    dayBefore: VideoSummary;
     topGrowth: VideoGrowth[];
     trend: VideoTrendPoint[];
   };
@@ -85,6 +86,7 @@ export interface PeriodReport {
     cumulative: LiveSummary;
     today: LiveSummary;
     yesterday: LiveSummary;
+    dayBefore: LiveSummary;
   };
 }
 

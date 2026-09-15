@@ -41,9 +41,11 @@ describe("ReportService", () => {
         if (!range.date) return videoSummary(999, 962, 87);
         const today = dateInTimezone("Asia/Shanghai");
         const yesterday = previousIsoDate(today);
+        const dayBeforeYesterday = previousIsoDate(yesterday);
         if (range.date === today) return videoSummary(803_000, 962, 87);
         if (range.date === yesterday) return videoSummary(1_110_000, 928, 86);
-        return videoSummary(908_000, 857, 86);
+        if (range.date === dayBeforeYesterday) return videoSummary(908_000, 857, 86);
+        return videoSummary(700_000, 800, 80);
       },
       getLiveSummary: async (_id: number, range: { date?: string }) => {
         liveDates.push(range.date);
@@ -56,15 +58,19 @@ describe("ReportService", () => {
     const today = dateInTimezone("Asia/Shanghai");
     const yesterday = previousIsoDate(today);
     const dayBeforeYesterday = previousIsoDate(yesterday);
+    const twoDaysBeforeYesterday = previousIsoDate(dayBeforeYesterday);
 
     expect(videoDates).toContain(today);
     expect(videoDates).toContain(yesterday);
     expect(videoDates).toContain(dayBeforeYesterday);
+    expect(videoDates).toContain(twoDaysBeforeYesterday);
     expect(liveDates).toContain(today);
     expect(liveDates).toContain(yesterday);
+    expect(liveDates).toContain(dayBeforeYesterday);
     expect(report?.range.yesterday).toBe(yesterday);
     expect(report?.video.today).toMatchObject({ playCount: 803_000, contentCount: 34, authorCount: 1 });
     expect(report?.video.yesterday).toMatchObject({ playCount: 1_110_000, contentCount: 71, authorCount: 0 });
+    expect(report?.video.dayBefore).toMatchObject({ playCount: 908_000, contentCount: 57, authorCount: 6 });
     expect(report?.live.yesterday.liveExposurePv).toBe(20);
   });
 

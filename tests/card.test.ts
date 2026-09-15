@@ -44,11 +44,13 @@ function report(period: ProjectPeriod): PeriodReport {
       to: "2026-09-14",
       today: "2026-09-14",
       yesterday: "2026-09-13",
+      dayBefore: "2026-09-12",
     },
     video: {
       cumulative: { playCount: 221_400, likeCount: 800, commentCount: 70, contentCount: 20, authorCount: 9 },
       today: { playCount: 12_040, likeCount: 90, commentCount: 8, contentCount: 5, authorCount: 4 },
       yesterday: { playCount: 9_800, likeCount: 70, commentCount: 6, contentCount: 3, authorCount: 2 },
+      dayBefore: { playCount: 7_500, likeCount: 55, commentCount: 4, contentCount: 2, authorCount: 1 },
       topGrowth: Array.from({ length: 7 }, (_, index) => ({
         contentConfigId: 15,
         videoId: `video-${index}`,
@@ -72,6 +74,7 @@ function report(period: ProjectPeriod): PeriodReport {
       cumulative: { liveExposurePv: 12000, avgAcu: 11.2, liveSessionCount: 30, anchorCount: 8 },
       today: { liveExposurePv: 900, avgAcu: 12, liveSessionCount: 3, anchorCount: 2 },
       yesterday: { liveExposurePv: 750, avgAcu: 10, liveSessionCount: 2, anchorCount: 1 },
+      dayBefore: { liveExposurePv: 600, avgAcu: 9, liveSessionCount: 1, anchorCount: 1 },
     },
   };
 }
@@ -196,6 +199,12 @@ describe("buildReportCard", () => {
     expect(json).toContain("昨日 TOP · 视频播放");
     expect(json).toContain("昨日新增");
     expect(json).not.toContain("今日新增</font>");
+    expect(json).toContain("▶ 昨日视频播放");
+    expect(json).toContain("前日视频播放");
+    expect(json.indexOf("▶ 昨日视频播放")).toBeLessThan(json.indexOf("前日视频播放"));
+    expect(json).toContain("◉ 昨日开播");
+    expect(json).toContain("前日开播");
+    expect(json).not.toContain("▶ 今日视频播放");
   });
 
   test("单期可显示主题衍生色的左右轴趋势图", () => {
