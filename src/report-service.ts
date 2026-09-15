@@ -37,7 +37,13 @@ export class ReportService {
       .sort((a, b) => this.compareProjects(a.projectId, b.projectId));
   }
 
-  async buildReports(periodIds: number[], rankingMode: RankingMode, includeTrend = false): Promise<PeriodReport[]> {
+  async buildReports(
+    periodIds: number[],
+    rankingMode: RankingMode,
+    includeTrend = false,
+    reportDate = dateInTimezone(this.timezone),
+  ): Promise<PeriodReport[]> {
+    if (!isIsoDate(reportDate)) throw new Error("日报日期无效");
     const metadata = await this.getMetadata();
     const uniqueIds = [...new Set(periodIds)];
     const byId = new Map(metadata.periods.map((period) => [period.activityPeriodId, period]));
@@ -47,7 +53,13 @@ export class ReportService {
     }
 
     const reports = await Promise.all(
-      uniqueIds.map((id) => this.buildPeriodReport(byId.get(id)!, metadata.contents, rankingMode, includeTrend)),
+      uniqueIds.map((id) => this.buildPeriodReport(
+        byId.get(id)!,
+        metadata.contents,
+        rankingMode,
+        includeTrend,
+        reportDate,
+      )),
     );
     return reports.sort((a, b) => this.compareProjects(a.period.projectId, b.period.projectId));
   }
@@ -57,12 +69,13 @@ export class ReportService {
     contents: MetadataCache["contents"],
     rankingMode: RankingMode,
     includeTrend: boolean,
+    reportDate: string,
   ): Promise<PeriodReport> {
-    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${dateInTimezone(this.timezone)}`;
+    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${reportDate}`;
     const cached = this.reportCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    const today = dateInTimezone(this.timezone);
+    const today = reportDate;
     const yesterday = previousIsoDate(today);
     const dayBeforeYesterday = previousIsoDate(yesterday);
     const twoDaysBeforeYesterday = previousIsoDate(dayBeforeYesterday);
@@ -240,6 +253,12 @@ export function previousIsoDate(value: string): string {
 
 function minIsoDate(a: string, b: string): string {
   return a < b ? a : b;
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function withVideoCountDeltas(current: VideoSummary, previous: VideoSummary): VideoSummary {

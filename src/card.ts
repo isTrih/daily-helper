@@ -105,7 +105,7 @@ export function buildReportCard(args: {
   }));
 
   const elements: CardElement[] = controlsMode === "full"
-    ? [...controls(allPeriods, state), { tag: "hr", margin: "4px 0 8px 0" }]
+    ? [...controls(allPeriods, state, timezone), { tag: "hr", margin: "4px 0 8px 0" }]
     : [];
 
   // 原始卡片 JSON 2.0 不支持模板循环，这里在服务端稳定展开每个项目的 Top 5。
@@ -115,6 +115,7 @@ export function buildReportCard(args: {
       report,
       state.rankingMode,
       timezone,
+      state.reportDate,
       isCombined,
       projectColors,
       state.showTrend === true && reports.length === 1,
@@ -207,7 +208,7 @@ export function buildReportCard(args: {
                 tag: "div",
                 text: {
                   tag: "lark_md",
-                  content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                  content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
                   text_size: "notation",
                   text_align: "right",
                 },
@@ -299,7 +300,7 @@ export function buildCollapsedReportCard(args: {
               tag: "div",
               text: {
                 tag: "lark_md",
-                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
+                content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
                 text_size: "notation",
                 text_align: "right",
               },
@@ -352,7 +353,7 @@ export function buildRecallConfirmationCard(args: {
               tag: "div",
               text: {
                 tag: "lark_md",
-                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
+                content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, args.timezone ?? "Asia/Shanghai")}</font>`,
                 text_size: "notation",
               },
             }]
@@ -409,7 +410,7 @@ export function buildLoadingReportCard(state: CardViewState, timezone = "Asia/Sh
               tag: "div",
               text: {
                 tag: "lark_md",
-                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
                 text_size: "notation",
                 text_align: "left",
               },
@@ -457,7 +458,7 @@ export function buildReportUpdateErrorCard(
               tag: "div",
               text: {
                 tag: "lark_md",
-                content: `<font color='grey'>卡片可交互有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
                 text_size: "notation",
               },
             }]
@@ -571,10 +572,11 @@ function cardStateValue(state: CardViewState): Record<string, string> {
     show_trend: String(state.showTrend ?? false),
     controls_mode: state.controlsMode ?? "full",
     expires_at: state.interactiveExpiresAt ?? "",
+    report_date: state.reportDate ?? "",
   };
 }
 
-function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElement[] {
+function controls(allPeriods: ProjectPeriod[], state: CardViewState, timezone: string): CardElement[] {
   const periodsById = new Map(allPeriods.map((period) => [period.activityPeriodId, period]));
   const availablePeriods = state.periodIds.flatMap((periodId) => {
     const period = periodsById.get(periodId);
@@ -587,6 +589,8 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
   const aggregateLabel = new Set(availablePeriods.map((period) => period.projectId)).size === 1
     ? "全部期次"
     : "所有项目";
+  const showAbsoluteDates = shouldUseAbsoluteDateLabels(state.reportDate, timezone);
+  const reportYesterday = state.reportDate ? previousIsoDateValue(state.reportDate) : undefined;
 
   return [
     {
@@ -648,7 +652,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           weight: 1,
           padding: "8px 0",
           elements: [
-            button("今日 TOP", "rank_today", {
+            button(rankingTitle("today", state.reportDate, reportYesterday, showAbsoluteDates), "rank_today", {
               action: "set_ranking",
               ...actionState,
               ranking_mode: "today",
@@ -661,7 +665,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           weight: 1,
           padding: "8px 0",
           elements: [
-            button("昨日 TOP", "rank_yesterday", {
+            button(rankingTitle("yesterday", state.reportDate, reportYesterday, showAbsoluteDates), "rank_yesterday", {
               action: "set_ranking",
               ...actionState,
               ranking_mode: "yesterday",
@@ -715,6 +719,7 @@ function reportElements(
   report: PeriodReport,
   rankingMode: CardViewState["rankingMode"],
   timezone: string,
+  reportDate: string | undefined,
   showHeading: boolean,
   projectColors: ProjectColors,
   showTrend: boolean,
@@ -723,8 +728,27 @@ function reportElements(
   const hasLiveData = hasCumulativeLiveData(live.cumulative);
   const color = colorFor(period.projectId, projectColors);
   const useYesterdayWindow = rankingMode === "yesterday";
-  const primaryDay = useYesterdayWindow ? "昨日" : "今日";
-  const comparisonDay = useYesterdayWindow ? "前日" : "昨日";
+  const showAbsoluteDates = shouldUseAbsoluteDateLabels(reportDate, timezone);
+  const primaryDate = useYesterdayWindow ? report.range.yesterday : report.range.today;
+  const comparisonDate = useYesterdayWindow ? report.range.dayBefore : report.range.yesterday;
+  const primaryDay = showAbsoluteDates
+    ? `${formatMonthDay(primaryDate)}数据 · `
+    : useYesterdayWindow ? "昨日" : "今日";
+  const comparisonDay = showAbsoluteDates
+    ? `${formatMonthDay(comparisonDate)}数据 · `
+    : useYesterdayWindow ? "前日" : "昨日";
+  const topTitle = rankingTitle(
+    rankingMode,
+    report.range.today,
+    report.range.yesterday,
+    showAbsoluteDates,
+  );
+  const growthLabel = rankingGrowthLabel(
+    rankingMode,
+    report.range.today,
+    report.range.yesterday,
+    showAbsoluteDates,
+  );
   const primaryVideo = useYesterdayWindow ? video.yesterday : video.today;
   const comparisonVideo = useYesterdayWindow ? video.dayBefore : video.yesterday;
   const primaryLive = useYesterdayWindow ? live.yesterday : live.today;
@@ -813,7 +837,7 @@ function reportElements(
           text_size: "notation",
         },
       },
-      compactTopGrowthElement(video.topGrowth, timezone, rankingMode),
+      compactTopGrowthElement(video.topGrowth, timezone, topTitle, growthLabel),
     ];
   }
 
@@ -842,10 +866,10 @@ function reportElements(
       margin: "4px 0 2px 0",
       text: {
         tag: "lark_md",
-        content: `**${rankingTitle(rankingMode)} · 视频播放**`,
+        content: `**${topTitle} · 视频播放**`,
       },
     },
-    ...topGrowthElements(video.topGrowth, timezone, rankingMode),
+    ...topGrowthElements(video.topGrowth, timezone, growthLabel),
   ];
 }
 
@@ -888,15 +912,15 @@ function highlightMetric(
 function compactTopGrowthElement(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
-  rankingMode: CardViewState["rankingMode"],
+  title: string,
+  growthLabel: string,
 ): CardElement {
-  const growthLabel = rankingGrowthLabel(rankingMode);
   if (items.length === 0) {
     return {
       tag: "div",
       text: {
         tag: "lark_md",
-        content: `**${rankingTitle(rankingMode)} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
+        content: `**${title} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
       },
     };
   }
@@ -915,7 +939,7 @@ function compactTopGrowthElement(
     tag: "div",
     text: {
       tag: "lark_md",
-      content: `**${rankingTitle(rankingMode)} · 视频播放**\n${rows.join("\n")}`,
+      content: `**${title} · 视频播放**\n${rows.join("\n")}`,
     },
   };
 }
@@ -1062,7 +1086,7 @@ function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
 function topGrowthElements(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
-  rankingMode: CardViewState["rankingMode"],
+  growthLabel: string,
 ): CardElement[] {
   if (items.length === 0) {
     return [
@@ -1081,7 +1105,6 @@ function topGrowthElements(
     const publishedAt = formatPublishTime(item.publishTime, timezone);
     const latest = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
     const meta = `${item.authorName || "未知作者"}丨发布 ${publishedAt}${latest}`;
-    const growthLabel = rankingGrowthLabel(rankingMode);
     return {
       tag: "column_set",
       flex_mode: "none",
@@ -1127,15 +1150,25 @@ function colorFor(projectId: number, projectColors: ProjectColors): CardColor {
   return projectColors[projectId] ?? defaultProjectColors[projectId] ?? "blue";
 }
 
-function rankingTitle(mode: CardViewState["rankingMode"]): string {
-  if (mode === "today") return "今日 TOP";
-  if (mode === "yesterday") return "昨日 TOP";
+function rankingTitle(
+  mode: CardViewState["rankingMode"],
+  today?: string,
+  yesterday?: string,
+  showAbsoluteDates = false,
+): string {
+  if (mode === "today") return showAbsoluteDates && today ? `${formatMonthDay(today)} TOP` : "今日 TOP";
+  if (mode === "yesterday") return showAbsoluteDates && yesterday ? `${formatMonthDay(yesterday)} TOP` : "昨日 TOP";
   return "本期 TOP";
 }
 
-function rankingGrowthLabel(mode: CardViewState["rankingMode"]): string {
-  if (mode === "today") return "今日新增";
-  if (mode === "yesterday") return "昨日新增";
+function rankingGrowthLabel(
+  mode: CardViewState["rankingMode"],
+  today: string,
+  yesterday: string,
+  showAbsoluteDates: boolean,
+): string {
+  if (mode === "today") return showAbsoluteDates ? `${formatMonthDay(today)}新增` : "今日新增";
+  if (mode === "yesterday") return showAbsoluteDates ? `${formatMonthDay(yesterday)}新增` : "昨日新增";
   return "本期新增";
 }
 
@@ -1212,4 +1245,32 @@ function formatInteractionExpiry(value: string, timezone: string): string {
   }).formatToParts(date);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function shouldUseAbsoluteDateLabels(reportDate: string | undefined, timezone: string): boolean {
+  return Boolean(reportDate && reportDate !== currentIsoDate(timezone));
+}
+
+function currentIsoDate(timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function previousIsoDateValue(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatMonthDay(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return safeMarkdownText(value);
+  return `${Number(match[2])}月${Number(match[3])}日`;
 }

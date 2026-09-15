@@ -177,6 +177,75 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(response.card?.data)).toContain("昨日 TOP · 视频播放");
   });
 
+  test("后续操作始终使用卡片发送时固定的报表日期", async () => {
+    let requestedReportDate = "";
+    const reportService = {
+      ...fakeReportService,
+      buildReports: async (ids: number[], _mode: string, _trend: boolean, reportDate: string) => {
+        requestedReportDate = reportDate;
+        return ids.map((id) => {
+          const value = makeReport(periods.find((period) => period.activityPeriodId === id)!);
+          value.range = {
+            from: "2026-09-01",
+            to: reportDate,
+            today: reportDate,
+            yesterday: "2026-09-09",
+            dayBefore: "2026-09-08",
+          };
+          return value;
+        });
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    const response = await handler({
+      action: {
+        tag: "overflow",
+        option: "rank_today",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "period",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          report_date: "2026-09-10",
+        },
+      },
+    });
+    const json = JSON.stringify(response.card?.data);
+
+    expect(requestedReportDate).toBe("2026-09-10");
+    expect(json).toContain("9月10日数据 · 视频播放");
+    expect(json).toContain('\"report_date\":\"2026-09-10\"');
+  });
+
+  test("兼容从旧卡片的十四天到期时间反推发送日期", async () => {
+    let requestedReportDate = "";
+    const reportService = {
+      ...fakeReportService,
+      buildReports: async (ids: number[], _mode: string, _trend: boolean, reportDate: string) => {
+        requestedReportDate = reportDate;
+        return ids.map((id) => makeReport(periods.find((period) => period.activityPeriodId === id)!));
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    await handler({
+      action: {
+        tag: "overflow",
+        option: "rank_today",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "period",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          expires_at: "2026-09-24T04:00:00.000Z",
+        },
+      },
+    });
+
+    expect(requestedReportDate).toBe("2026-09-10");
+  });
+
   test("折叠按钮组可显示和隐藏单期趋势图", async () => {
     let includeTrend = false;
     const reportService = {

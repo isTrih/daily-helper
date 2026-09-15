@@ -221,6 +221,41 @@ describe("buildReportCard", () => {
     expect(json).not.toContain("◉");
   });
 
+  test("历史日报使用固定日期文案并把报表日期写入所有交互", () => {
+    const historicalReport = report(periods[0]!);
+    historicalReport.range = {
+      from: "2026-09-01",
+      to: "2026-09-10",
+      today: "2026-09-10",
+      yesterday: "2026-09-09",
+      dayBefore: "2026-09-08",
+    };
+    const card = buildReportCard({
+      reports: [historicalReport],
+      allPeriods: periods,
+      state: {
+        scope: "period",
+        periodIds: [10],
+        selectedPeriodId: 10,
+        rankingMode: "today",
+        reportDate: "2026-09-10",
+        interactiveExpiresAt: "2026-09-24T04:00:00.000Z",
+      },
+      timezone: "Asia/Shanghai",
+    });
+    const json = JSON.stringify(card);
+
+    expect(json).toContain("9月10日数据 · 视频播放");
+    expect(json).toContain("9月9日数据 · 视频播放");
+    expect(json).toContain("9月10日数据 · 开播");
+    expect(json).toContain("9月10日 TOP · 视频播放");
+    expect(json).toContain("9月10日新增");
+    expect(json).toContain('\"report_date\":\"2026-09-10\"');
+    expect(json).toContain("卡片可互动有效期至 26-09-24");
+    expect(json).not.toContain("今日视频播放");
+    expect(json).not.toContain("昨日视频播放");
+  });
+
   test("单期可显示主题衍生色的左右轴趋势图", () => {
     const card = buildReportCard({
       reports: [report(periods[0]!)],

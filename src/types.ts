@@ -100,6 +100,7 @@ export interface CardViewState {
   showTrend?: boolean;
   controlsMode?: "full" | "tools";
   interactiveExpiresAt?: string;
+  reportDate?: string;
 }
 
 export type CardJson = Record<string, unknown>;

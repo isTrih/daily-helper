@@ -1,6 +1,6 @@
 import { buildReportCard } from "./card.ts";
 import { LarkService } from "./lark-service.ts";
-import { ReportService } from "./report-service.ts";
+import { dateInTimezone, ReportService } from "./report-service.ts";
 import type { CardJson, ProjectColors, ProjectIcons, RankingMode, ReportMode } from "./types.ts";
 
 export interface ReportRequest {
@@ -47,7 +47,9 @@ export class ReportOrchestrator {
     const enableForward = request.enableForward ?? false;
     const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
     const showTrend = request.showTrend ?? false;
-    const interactiveExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1_000).toISOString();
+    const createdAt = new Date();
+    const reportDate = dateInTimezone(this.timezone, createdAt);
+    const interactiveExpiresAt = new Date(createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000).toISOString();
 
     if (request.mode === "combined") {
       const initialPeriodId = requestedIds[0]!;
@@ -58,6 +60,7 @@ export class ReportOrchestrator {
         visiblePeriodIds,
         request.rankingMode,
         showTrend && visiblePeriodIds.length === 1,
+        reportDate,
       );
       return [
         buildReportCard({
@@ -72,6 +75,7 @@ export class ReportOrchestrator {
             enableForwardInteraction,
             showTrend,
             interactiveExpiresAt,
+            reportDate,
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
@@ -80,7 +84,7 @@ export class ReportOrchestrator {
       ];
     }
 
-    const periodReports = await this.reports.buildReports(requestedIds, request.rankingMode, showTrend);
+    const periodReports = await this.reports.buildReports(requestedIds, request.rankingMode, showTrend, reportDate);
     return periodReports.map((report) =>
       buildReportCard({
         reports: [report],
@@ -98,6 +102,7 @@ export class ReportOrchestrator {
           showTrend,
           controlsMode: "tools",
           interactiveExpiresAt,
+          reportDate,
         },
         timezone: this.timezone,
       }),

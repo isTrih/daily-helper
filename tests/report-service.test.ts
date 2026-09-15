@@ -78,6 +78,41 @@ describe("ReportService", () => {
     expect(previousIsoDate("2026-01-01")).toBe("2025-12-31");
   });
 
+  test("显式报表日期会固定每日、累计和排行查询范围", async () => {
+    const videoRanges: Array<{ date?: string; from?: string; to?: string }> = [];
+    let rankingRange: { date?: string; from?: string; to?: string } = {};
+    const emptyVideo = { playCount: 0, likeCount: 0, commentCount: 0, contentCount: 0, authorCount: 0 };
+    const client = {
+      listProjectPeriods: async () => [period],
+      listContents: async () => [{ contentConfigId: 100, activityPeriodId: 10, contentType: "video" }],
+      getVideoSummary: async (_id: number, range: { date?: string; from?: string; to?: string }) => {
+        videoRanges.push(range);
+        return emptyVideo;
+      },
+      getLiveSummary: async () => ({ liveExposurePv: 0, avgAcu: null, liveSessionCount: 0, anchorCount: 0 }),
+      getTopGrowth: async (_id: number, range: typeof rankingRange) => {
+        rankingRange = range;
+        return [];
+      },
+    };
+    const service = new ReportService(client as never, "Asia/Shanghai");
+    const [result] = await service.buildReports([10], "today", false, "2026-09-10");
+
+    expect(result?.range).toEqual({
+      from: "2026-09-01",
+      to: "2026-09-10",
+      today: "2026-09-10",
+      yesterday: "2026-09-09",
+      dayBefore: "2026-09-08",
+    });
+    expect(videoRanges).toContainEqual({ from: "2026-09-01", to: "2026-09-10" });
+    expect(videoRanges).toContainEqual({ date: "2026-09-10" });
+    expect(videoRanges).toContainEqual({ date: "2026-09-09" });
+    expect(videoRanges).toContainEqual({ date: "2026-09-08" });
+    expect(videoRanges).toContainEqual({ date: "2026-09-07" });
+    expect(rankingRange).toEqual({ date: "2026-09-10" });
+  });
+
   test("昨日 TOP 使用昨日日期查询", async () => {
     let rankingRange: { date?: string; from?: string; to?: string } = {};
     const client = {

@@ -7,7 +7,7 @@ import {
   buildReportUpdateErrorCard,
 } from "./card.ts";
 import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-service.ts";
-import { ReportService } from "./report-service.ts";
+import { dateInTimezone, ReportService } from "./report-service.ts";
 import type { CardJson, CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
 
 const actionValueSchema = z.object({
@@ -34,6 +34,7 @@ const actionValueSchema = z.object({
   show_trend: z.enum(["true", "false"]).default("false"),
   controls_mode: z.enum(["full", "tools"]).default("full"),
   expires_at: z.string().optional(),
+  report_date: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("")]).optional(),
   return_view: z.enum(["full", "collapsed"]).optional(),
 });
 
@@ -84,6 +85,7 @@ export function createCardActionHandler(
       const originPeriodIds = parsePeriodIds(action.period_ids);
       const enableForward = action.enable_forward === "true";
       const enableForwardInteraction = enableForward && action.enable_forward_interaction === "true";
+      const reportDate = resolveReportDate(action.report_date, action.expires_at, timezone);
       let showTrend = action.show_trend === "true";
       if (actionType === "toggle_trend") showTrend = event.action?.option === "show_trend";
       let reportPeriodIds: number[];
@@ -106,6 +108,7 @@ export function createCardActionHandler(
           showTrend,
           controlsMode: action.controls_mode,
           ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
+          reportDate,
         };
       } else if (actionType === "show_latest") {
         if (originPeriodIds.length === 0) throw new Error("卡片未包含可选期次");
@@ -119,6 +122,7 @@ export function createCardActionHandler(
           showTrend,
           controlsMode: action.controls_mode,
           ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
+          reportDate,
         };
       } else {
         const selectedPeriodId = Number(action.selected_period_id);
@@ -137,6 +141,7 @@ export function createCardActionHandler(
             showTrend,
             controlsMode: action.controls_mode,
             ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
+            reportDate,
           };
         } else {
           reportPeriodIds = originPeriodIds;
@@ -150,6 +155,7 @@ export function createCardActionHandler(
             showTrend,
             controlsMode: action.controls_mode,
             ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
+            reportDate,
           };
         }
       }
@@ -212,6 +218,7 @@ async function buildActionResponse(args: {
       reportPeriodIds,
       state.rankingMode,
       state.showTrend === true && reportPeriodIds.length === 1,
+      state.reportDate,
     ),
   ]);
   const card = actionType === "collapse_card"
@@ -284,4 +291,15 @@ function parsePeriodIds(value: string | undefined): number[] {
     .split(",")
     .map(Number)
     .filter((periodId) => Number.isSafeInteger(periodId) && periodId > 0))];
+}
+
+function resolveReportDate(value: string | undefined, expiresAt: string | undefined, timezone: string): string {
+  if (value) return value;
+  if (expiresAt) {
+    const expiry = new Date(expiresAt);
+    if (!Number.isNaN(expiry.getTime())) {
+      return dateInTimezone(timezone, new Date(expiry.getTime() - 14 * 24 * 60 * 60 * 1_000));
+    }
+  }
+  return dateInTimezone(timezone);
 }
