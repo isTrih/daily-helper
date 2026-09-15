@@ -32,7 +32,13 @@ let scheduledJob: Cron | undefined;
 if (larkService && config.lark.longConnectionEnabled) {
   larkService
     .startCardActionConnection(
-      createCardActionHandler(reportService, config.schedule.timezone, config.projectColors, config.projectIcons),
+      createCardActionHandler(
+        reportService,
+        config.schedule.timezone,
+        config.projectColors,
+        config.projectIcons,
+        (messageId) => larkService.recallMessage(messageId),
+      ),
     )
     .catch((error) => console.error("[lark] 无法建立卡片回调长连接", error));
 } else if (!larkService) {

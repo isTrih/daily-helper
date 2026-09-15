@@ -1,29 +1,60 @@
 import { z } from "zod";
-import { buildReportCard } from "./card.ts";
+import { buildCollapsedReportCard, buildRecallConfirmationCard, buildReportCard } from "./card.ts";
 import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-service.ts";
 import { ReportService } from "./report-service.ts";
 import type { CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
 
 const actionValueSchema = z.object({
-  action: z.enum(["select_period", "show_latest", "set_ranking", "overflow_action"]),
+  action: z.enum([
+    "select_period",
+    "show_latest",
+    "set_ranking",
+    "overflow_action",
+    "card_tools",
+    "confirm_recall",
+    "cancel_recall",
+  ]),
   ranking_mode: z.enum(["today", "period"]).default("today"),
   scope: z.enum(["combined", "period"]).optional(),
   period_ids: z.string().optional(),
   selected_period_id: z.string().optional(),
+  return_view: z.enum(["full", "collapsed"]).optional(),
 });
+
+type ActionType =
+  | "select_period"
+  | "show_latest"
+  | "set_ranking"
+  | "collapse_card"
+  | "expand_card"
+  | "request_recall"
+  | "confirm_recall"
+  | "cancel_recall";
 
 export function createCardActionHandler(
   reportService: ReportService,
   timezone: string,
   projectColors: ProjectColors = {},
   projectIcons: ProjectIcons = {},
+  recallMessage?: (messageId: string) => Promise<void>,
 ) {
   return async (event: LongConnectionCardActionEvent): Promise<CardActionResponse> => {
     try {
       const action = actionValueSchema.parse(event.action?.value);
-      const actionType: "select_period" | "show_latest" | "set_ranking" = action.action === "overflow_action"
+      const actionType: ActionType = action.action === "overflow_action"
         ? overflowAction(event.action?.option)
-        : action.action;
+        : action.action === "card_tools"
+          ? cardToolAction(event.action?.option)
+          : action.action;
+
+      if (actionType === "confirm_recall") {
+        if (!recallMessage) throw new Error("当前未启用卡片撤回能力");
+        const messageId = event.context?.open_message_id ?? event.open_message_id;
+        if (!messageId) throw new Error("回调中缺少卡片消息 ID");
+        await recallMessage(messageId);
+        return { toast: { type: "success", content: "日报卡片已撤回" } };
+      }
+
       let rankingMode = action.ranking_mode;
       if (action.action === "overflow_action") {
         if (event.action?.option === "rank_today") rankingMode = "today";
@@ -72,9 +103,24 @@ export function createCardActionHandler(
       }
 
       const reports = await reportService.buildReports(reportPeriodIds, state.rankingMode);
-      const card = buildReportCard({ reports, allPeriods, state, timezone, projectColors, projectIcons });
+      const card = actionType === "collapse_card"
+        ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
+        : actionType === "request_recall"
+          ? buildRecallConfirmationCard({ reports, state, returnView: action.return_view ?? "full" })
+          : actionType === "cancel_recall" && action.return_view === "collapsed"
+            ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
+            : buildReportCard({ reports, allPeriods, state, timezone, projectColors, projectIcons });
+      const toast = actionType === "collapse_card"
+        ? { type: "success" as const, content: "卡片已收起" }
+        : actionType === "expand_card"
+          ? { type: "success" as const, content: "卡片已展开" }
+          : actionType === "request_recall"
+            ? { type: "warning" as const, content: "请确认是否撤回" }
+            : actionType === "cancel_recall"
+              ? { type: "info" as const, content: "已取消撤回" }
+              : { type: "success" as const, content: "日报视图已更新" };
       return {
-        toast: { type: "success", content: "日报视图已更新" },
+        toast,
         card: { type: "raw", data: card },
       };
     } catch (error) {
@@ -82,11 +128,16 @@ export function createCardActionHandler(
       return {
         toast: {
           type: "error",
-          content: error instanceof Error ? `更新失败：${error.message.slice(0, 80)}` : "更新失败，请稍后重试",
+          content: error instanceof Error ? `操作失败：${error.message.slice(0, 80)}` : "操作失败，请稍后重试",
         },
       };
     }
   };
+}
+
+function cardToolAction(value: string | undefined): "collapse_card" | "expand_card" | "request_recall" {
+  if (value === "collapse_card" || value === "expand_card" || value === "request_recall") return value;
+  throw new Error("卡片管理操作无效");
 }
 
 function overflowAction(value: string | undefined): "show_latest" | "set_ranking" {

@@ -2,6 +2,7 @@ import * as lark from "@larksuiteoapi/node-sdk";
 import type { CardJson, ChatOption } from "./types.ts";
 
 export interface LongConnectionCardActionEvent {
+  open_message_id?: string;
   action?: {
     value?: unknown;
     tag?: string;
@@ -83,6 +84,13 @@ export class LarkService {
     const messageId = response.data?.message_id;
     if (!messageId) throw new Error("飞书发送成功但未返回 message_id");
     return messageId;
+  }
+
+  async recallMessage(messageId: string): Promise<void> {
+    const response = await this.client.im.v1.message.delete({
+      path: { message_id: messageId },
+    });
+    assertLarkSuccess(response.code, response.msg, `撤回消息 ${messageId}`);
   }
 
   async startCardActionConnection(

@@ -115,4 +115,84 @@ describe("折叠按钮组回调", () => {
       img_key: "img_v2_rok",
     });
   });
+
+  test("收起和展开卡片时保留当前项目视图", async () => {
+    const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
+    const actionState = {
+      action: "card_tools",
+      ranking_mode: "period",
+      scope: "period",
+      period_ids: "53,10",
+      selected_period_id: "53",
+      return_view: "full",
+    };
+    const collapsed = await handler({
+      action: { tag: "overflow", option: "collapse_card", value: actionState },
+    });
+    expect(collapsed.toast?.content).toBe("卡片已收起");
+    expect(JSON.stringify(collapsed.card?.data)).toContain("日报已收起");
+    expect(JSON.stringify(collapsed.card?.data)).not.toContain("视频播放 Top 5");
+
+    const expanded = await handler({
+      action: { tag: "overflow", option: "expand_card", value: { ...actionState, return_view: "collapsed" } },
+    });
+    expect(expanded.toast?.content).toBe("卡片已展开");
+    expect(JSON.stringify(expanded.card?.data)).toContain("本期增长 · 视频播放 Top 5");
+  });
+
+  test("撤回先显示确认卡片，取消后恢复原视图", async () => {
+    const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
+    const actionState = {
+      action: "card_tools",
+      ranking_mode: "today",
+      scope: "period",
+      period_ids: "53,10",
+      selected_period_id: "53",
+      return_view: "collapsed",
+    };
+    const confirmation = await handler({
+      action: { tag: "overflow", option: "request_recall", value: actionState },
+    });
+    expect(confirmation.toast?.content).toBe("请确认是否撤回");
+    expect(JSON.stringify(confirmation.card?.data)).toContain("撤回确认");
+
+    const cancelled = await handler({
+      action: {
+        tag: "button",
+        value: { ...actionState, action: "cancel_recall" },
+      },
+    });
+    expect(cancelled.toast?.content).toBe("已取消撤回");
+    expect(JSON.stringify(cancelled.card?.data)).toContain("日报已收起");
+  });
+
+  test("确认撤回时使用回调消息 ID 且不再返回替换卡片", async () => {
+    let recalledMessageId = "";
+    const handler = createCardActionHandler(
+      fakeReportService as never,
+      "Asia/Shanghai",
+      {},
+      {},
+      async (messageId) => {
+        recalledMessageId = messageId;
+      },
+    );
+    const response = await handler({
+      context: { open_message_id: "om_daily_report" },
+      action: {
+        tag: "button",
+        value: {
+          action: "confirm_recall",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          return_view: "full",
+        },
+      },
+    });
+    expect(recalledMessageId).toBe("om_daily_report");
+    expect(response.toast).toEqual({ type: "success", content: "日报卡片已撤回" });
+    expect(response.card).toBeUndefined();
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildReportCard } from "../src/card.ts";
+import { buildCollapsedReportCard, buildRecallConfirmationCard, buildReportCard } from "../src/card.ts";
 import type { PeriodReport, ProjectPeriod } from "../src/types.ts";
 
 const periods: ProjectPeriod[] = [
@@ -118,15 +118,17 @@ describe("buildReportCard", () => {
     expect(json).toContain("+1.2w");
     expect(json).not.toContain("221,400");
     expect(json).toContain("今日新增");
-    expect(json).toContain("昨日视频新增");
-    expect(json).toContain("昨日新增直播");
+    expect(json).toContain("今日视频播放");
+    expect(json).toContain("昨日视频播放");
+    expect(json).toContain("新增稿件 5丨参与作者 4");
+    expect(json).toContain("昨日开播");
     expect(json).toContain("统计区间 2026-09-01 — 2026-09-14");
     expect(json).not.toContain("今日增长与本期进度");
     expect(json).not.toContain("<text_align");
     expect(json).not.toContain("视频排行范围");
-    expect(json).toContain("今日新增直播");
+    expect(json).toContain("今日开播");
     expect(json).toContain("3 场");
-    expect(json).toContain("2 位主播");
+    expect(json).toContain("参与主播 2");
     expect(json).toContain("直播PV 1.2w");
     expect(json).not.toContain("直播曝光");
     expect(json).not.toContain("**+900**");
@@ -138,6 +140,9 @@ describe("buildReportCard", () => {
     expect(json).toContain('"show_name":true');
     expect(json).toContain('"style":"capsule"');
     expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
+    expect(json).toContain('"tag":"overflow"');
+    expect(json).toContain("收起卡片");
+    expect(json).toContain("撤回卡片");
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -160,11 +165,9 @@ describe("buildReportCard", () => {
     expect(json).toContain("本期增长 · 视频播放 Top 5");
     expect(json).toContain("本期新增");
     expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
-    expect(json).toContain('"flex_mode":"trisect"');
-    expect(json).toContain("**800**</font>\\n<font color='grey'>点赞</font>");
-    expect(json).toContain("**70**</font>\\n<font color='grey'>评论</font>");
-    expect(json).toContain("**11.2**</font>\\n<font color='grey'>平均 ACU</font>");
-    expect(json).not.toContain("<font color='grey'>点赞 800");
+    expect(json).not.toContain("<font color='grey'>点赞</font>");
+    expect(json).not.toContain("<font color='grey'>评论</font>");
+    expect(json).not.toContain("平均 ACU");
     expect(json).toContain('"flex_mode":"flow","horizontal_spacing":"6px","margin":"2px 0","columns"');
   });
 
@@ -211,6 +214,43 @@ describe("buildReportCard", () => {
     expect(json).not.toContain('"select_static"');
     expect(json).not.toContain("所有项目");
     expect(json).not.toContain("[ROK]生态");
+    expect(json).not.toContain("撤回卡片");
+  });
+
+  test("收起卡片只保留标题、更新时间和管理菜单", () => {
+    const card = buildCollapsedReportCard({
+      reports: [report(periods[0]!)],
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      timezone: "Asia/Shanghai",
+      projectColors: { 1: "red" },
+      projectIcons: { 1: "img_v2_project_one" },
+    });
+    const json = JSON.stringify(card);
+    expect((card.header as Record<string, unknown>).template).toBe("red");
+    expect((card.header as Record<string, unknown>).icon).toEqual({
+      tag: "custom_icon",
+      img_key: "img_v2_project_one",
+    });
+    expect(json).toContain("日报已收起");
+    expect(json).toContain("展开卡片");
+    expect(json).toContain("撤回卡片");
+    expect(json).not.toContain("今日视频播放");
+    expect(json).not.toContain("视频播放 Top 5");
+  });
+
+  test("撤回确认卡片提供确认和取消操作并保留返回视图", () => {
+    const card = buildRecallConfirmationCard({
+      reports: [report(periods[0]!)],
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "period" },
+      returnView: "collapsed",
+    });
+    const json = JSON.stringify(card);
+    expect((card.header as { title: { content: string } }).title.content).toBe("撤回确认");
+    expect(json).toContain("确认撤回");
+    expect(json).toContain("取消撤回");
+    expect(json).toContain('"type":"danger"');
+    expect(json).toContain('"return_view":"collapsed"');
+    expect(json).not.toContain("今日视频播放");
   });
 
   test("项目颜色配置覆盖默认卡片主题和标签色", () => {
@@ -274,7 +314,7 @@ describe("buildReportCard", () => {
       (element) =>
         element.tag === "column_set" &&
         element.margin === "2px 0" &&
-        JSON.stringify(element).includes("今日视频新增"),
+        JSON.stringify(element).includes("今日视频播放"),
     );
     expect(dailyRow?.flex_mode).toBe("bisect");
     expect(dailyRow?.columns as unknown[]).toHaveLength(2);

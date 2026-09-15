@@ -152,6 +152,16 @@ export function buildReportCard(args: {
           },
         ],
       },
+      ...(interactive
+        ? [
+            {
+              tag: "column",
+              width: "auto",
+              vertical_align: "center",
+              elements: [cardTools(state, "full")],
+            },
+          ]
+        : []),
     ],
   });
 
@@ -180,6 +190,201 @@ export function buildReportCard(args: {
       vertical_spacing: "8px",
       elements,
     },
+  };
+}
+
+export function buildCollapsedReportCard(args: {
+  reports: PeriodReport[];
+  state: CardViewState;
+  timezone?: string;
+  projectColors?: ProjectColors;
+  projectIcons?: ProjectIcons;
+}): CardJson {
+  const { reports, state } = args;
+  if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
+
+  const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {});
+  return {
+    schema: "2.0",
+    config: interactiveCardConfig(identity.title, identity.subtitle),
+    header: cardHeader(identity),
+    body: {
+      direction: "vertical",
+      padding: "10px 12px",
+      elements: [
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          horizontal_align: "right",
+          horizontal_spacing: "8px",
+          columns: [
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              vertical_align: "center",
+              elements: [
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: `<font color='grey'>日报已收起 · 更新于 ${formatUpdateTime(args.timezone ?? "Asia/Shanghai")}</font>`,
+                    text_size: "notation",
+                  },
+                },
+              ],
+            },
+            {
+              tag: "column",
+              width: "auto",
+              vertical_align: "center",
+              elements: [cardTools(state, "collapsed")],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+export function buildRecallConfirmationCard(args: {
+  reports: PeriodReport[];
+  state: CardViewState;
+  returnView: "full" | "collapsed";
+}): CardJson {
+  const { reports, state, returnView } = args;
+  if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
+
+  const title = reports.length === 1 ? reports[0]!.period.period : "项目每日速览";
+  const actionState = { ...cardStateValue(state), return_view: returnView };
+  return {
+    schema: "2.0",
+    config: {
+      update_multi: true,
+      enable_forward: false,
+      enable_forward_interaction: false,
+      summary: { content: `确认撤回 ${title}` },
+    },
+    header: {
+      template: "red",
+      title: { tag: "plain_text", content: "撤回确认" },
+      subtitle: { tag: "plain_text", content: title },
+      icon: { tag: "standard_icon", token: "warning_outlined" },
+      padding: "12px",
+    },
+    body: {
+      direction: "vertical",
+      padding: "12px",
+      vertical_spacing: "10px",
+      elements: [
+        {
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: "**确认撤回这条日报卡片？**\n<font color='grey'>撤回后将从当前会话中移除，且无法恢复。</font>",
+          },
+        },
+        {
+          tag: "column_set",
+          flex_mode: "bisect",
+          horizontal_spacing: "8px",
+          columns: [
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              elements: [button("取消撤回", "cancel_recall", { action: "cancel_recall", ...actionState })],
+            },
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              elements: [button("确认撤回", "confirm_recall", { action: "confirm_recall", ...actionState }, false, "danger")],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function cardIdentity(
+  reports: PeriodReport[],
+  projectColors: ProjectColors,
+  projectIcons: ProjectIcons,
+): {
+  title: string;
+  subtitle: string;
+  theme: CardColor;
+  iconKey?: string;
+} {
+  const focusedReport = reports.length === 1 ? reports[0] : undefined;
+  return {
+    title: focusedReport ? focusedReport.period.period : "项目每日速览",
+    subtitle: `统计区间 ${reports[0]!.range.from} — ${reports[0]!.range.to}`,
+    theme: focusedReport ? colorFor(focusedReport.period.projectId, projectColors) : "blue",
+    ...(focusedReport && projectIcons[focusedReport.period.projectId]
+      ? { iconKey: projectIcons[focusedReport.period.projectId] }
+      : {}),
+  };
+}
+
+function interactiveCardConfig(title: string, subtitle: string): Record<string, unknown> {
+  return {
+    update_multi: true,
+    enable_forward: false,
+    enable_forward_interaction: false,
+    summary: { content: `${title}｜${subtitle}` },
+    style: cardColorStyle,
+  };
+}
+
+function cardHeader(identity: ReturnType<typeof cardIdentity>): Record<string, unknown> {
+  return {
+    template: identity.theme,
+    title: { tag: "plain_text", content: identity.title },
+    subtitle: { tag: "plain_text", content: identity.subtitle },
+    icon: identity.iconKey
+      ? { tag: "custom_icon", img_key: identity.iconKey }
+      : { tag: "standard_icon", token: "chart-pie_outlined" },
+    padding: "12px",
+  };
+}
+
+function cardTools(state: CardViewState, view: "full" | "collapsed"): CardElement {
+  return {
+    tag: "overflow",
+    element_id: view === "full" ? "card_tools" : "collapsed_tools",
+    size: "small",
+    options: [
+      {
+        text: { tag: "plain_text", content: view === "full" ? "收起卡片" : "展开卡片" },
+        value: view === "full" ? "collapse_card" : "expand_card",
+      },
+      {
+        text: { tag: "plain_text", content: "撤回卡片" },
+        value: "request_recall",
+      },
+    ],
+    behaviors: [
+      {
+        type: "callback",
+        value: {
+          action: "card_tools",
+          ...cardStateValue(state),
+          return_view: view,
+        },
+      },
+    ],
+  };
+}
+
+function cardStateValue(state: CardViewState): Record<string, string> {
+  return {
+    ranking_mode: state.rankingMode,
+    scope: state.scope,
+    period_ids: state.periodIds.join(","),
+    selected_period_id: state.selectedPeriodId ? String(state.selectedPeriodId) : "",
   };
 }
 
@@ -285,11 +490,12 @@ function button(
   elementId: string,
   value: Record<string, string>,
   active = false,
+  type?: "default" | "primary" | "danger",
 ): CardElement {
   return {
     tag: "button",
     element_id: elementId,
-    type: active ? "primary" : "default",
+    type: type ?? (active ? "primary" : "default"),
     size: "small",
     width: "fill",
     text: { tag: "plain_text", content: label },
@@ -313,31 +519,31 @@ function reportElements(
     : [];
   const dailyMetricColumns: CardElement[] = [
     highlightMetric(
-      "▶ 今日视频新增",
+      "▶ 今日视频播放",
       video.today.playCount,
-      `稿件 ${formatNumber(video.today.contentCount)}丨作者 ${formatNumber(video.today.authorCount)}`,
+      `新增稿件 ${formatNumber(video.today.contentCount)}丨参与作者 ${formatNumber(video.today.authorCount)}`,
       metricTones.video,
       true,
     ),
     highlightMetric(
-      "昨日视频新增",
+      "昨日视频播放",
       video.yesterday.playCount,
-      `稿件 ${formatNumber(video.yesterday.contentCount)}丨作者 ${formatNumber(video.yesterday.authorCount)}`,
+      `新增稿件 ${formatNumber(video.yesterday.contentCount)}丨参与作者 ${formatNumber(video.yesterday.authorCount)}`,
       metricTones.content,
       true,
     ),
     ...(hasLiveData
       ? [
           highlightMetric(
-            "◉ 今日新增直播",
+            "◉ 今日开播",
             `${formatNumber(live.today.liveSessionCount)} 场`,
-            `${formatNumber(live.today.anchorCount)} 位主播`,
+            `参与主播 ${formatNumber(live.today.anchorCount)}`,
             metricTones.live,
           ),
           highlightMetric(
-            "昨日新增直播",
+            "昨日开播",
             `${formatNumber(live.yesterday.liveSessionCount)} 场`,
-            `${formatNumber(live.yesterday.anchorCount)} 位主播`,
+            `参与主播 ${formatNumber(live.yesterday.anchorCount)}`,
             metricTones.activity,
           ),
         ]
@@ -370,20 +576,6 @@ function reportElements(
         ]
       : []),
   ];
-  const secondaryMetrics: CardElement[] = [
-    summaryMetric("点赞", video.cumulative.likeCount, metricTones.video),
-    summaryMetric("评论", video.cumulative.commentCount, metricTones.content),
-    ...(hasLiveData
-      ? [
-          summaryMetric(
-            "平均 ACU",
-            live.cumulative.avgAcu === null ? "—" : formatNumber(live.cumulative.avgAcu),
-            metricTones.live,
-          ),
-        ]
-      : []),
-  ];
-
   if (showHeading) {
     return [
       ...headingElements,
@@ -410,13 +602,6 @@ function reportElements(
       horizontal_spacing: "6px",
       margin: "2px 0",
       columns: cumulativeMetrics,
-    },
-    {
-      tag: "column_set",
-      flex_mode: hasLiveData ? "trisect" : "bisect",
-      horizontal_spacing: "6px",
-      margin: "4px 0 8px 0",
-      columns: secondaryMetrics,
     },
     {
       tag: "div",
