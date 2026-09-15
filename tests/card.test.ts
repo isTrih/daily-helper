@@ -67,6 +67,12 @@ function report(period: ProjectPeriod): PeriodReport {
   };
 }
 
+function reportWithoutLive(period: ProjectPeriod): PeriodReport {
+  const value = report(period);
+  value.live.cumulative = { liveExposurePv: 0, avgAcu: null, liveSessionCount: 0, anchorCount: 0 };
+  return value;
+}
+
 describe("buildReportCard", () => {
   test("构建共享的 JSON 2.0 多合一卡片，并只展开每项目前 5 条", () => {
     const card = buildReportCard({
@@ -90,8 +96,17 @@ describe("buildReportCard", () => {
     expect(json).toContain('"background_style":"cus-0"');
     expect(json).toContain('"light_mode":"rgba(240,246,255,0.88)"');
     expect(json).toContain('"flex_mode":"flow"');
-    expect(json).toContain('"flex_mode":"bisect"');
+    const fourColumnDailyRows = (card.body as { elements: Array<Record<string, unknown>> }).elements.filter(
+      (element) =>
+        element.tag === "column_set" &&
+        element.flex_mode === "flow" &&
+        element.margin === "2px 0" &&
+        (element.columns as unknown[]).length === 4,
+    );
+    expect(fourColumnDailyRows).toHaveLength(2);
     expect(json).toContain("累计播放 2000");
+    expect(json).toContain("作者0丨发布 09/13 16:00丨累计播放 2000丨今日新增");
+    expect(json).not.toContain("作者0　·　发布");
     expect(json).toContain("22.1w");
     expect(json).toContain("+1.2w");
     expect(json).not.toContain("221,400");
@@ -115,6 +130,7 @@ describe("buildReportCard", () => {
     expect(json).toContain('"user_id":"ou_c909863fbf86e93840200f4d30a2229c"');
     expect(json).toContain('"show_name":true');
     expect(json).toContain('"style":"capsule"');
+    expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -137,6 +153,12 @@ describe("buildReportCard", () => {
     expect(json).toContain("本期增长 · 视频播放 Top 5");
     expect(json).toContain("本期新增");
     expect(json).not.toContain("<text_tag");
+    expect(json).toContain('"flex_mode":"trisect"');
+    expect(json).toContain("**800**</font>\\n<font color='grey'>点赞</font>");
+    expect(json).toContain("**70**</font>\\n<font color='grey'>评论</font>");
+    expect(json).toContain("**11.2**</font>\\n<font color='grey'>平均 ACU</font>");
+    expect(json).not.toContain("<font color='grey'>点赞 800");
+    expect(json).toContain('"flex_mode":"flow","horizontal_spacing":"6px","margin":"2px 0","columns"');
   });
 
   test("交互组件携带期次和排行视图状态", () => {
@@ -228,5 +250,38 @@ describe("buildReportCard", () => {
       tag: "standard_icon",
       token: "chart-pie_outlined",
     });
+  });
+
+  test("累计直播为空时隐藏单项目的所有直播板块", () => {
+    const card = buildReportCard({
+      reports: [reportWithoutLive(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+    });
+    const json = JSON.stringify(card);
+    expect(json).not.toContain("直播");
+    expect(json).not.toContain("主播");
+    expect(json).not.toContain("平均 ACU");
+
+    const dailyRow = (card.body as { elements: Array<Record<string, unknown>> }).elements.find(
+      (element) =>
+        element.tag === "column_set" &&
+        element.margin === "2px 0" &&
+        JSON.stringify(element).includes("今日视频新增"),
+    );
+    expect(dailyRow?.flex_mode).toBe("bisect");
+    expect(dailyRow?.columns as unknown[]).toHaveLength(2);
+  });
+
+  test("累计直播为空时多项目紧凑卡也不展示直播板块", () => {
+    const card = buildReportCard({
+      reports: periods.map(reportWithoutLive),
+      allPeriods: periods,
+      state: { scope: "combined", periodIds: [10, 11], rankingMode: "today" },
+    });
+    const json = JSON.stringify(card);
+    expect(json).not.toContain("直播");
+    expect(json).not.toContain("主播");
+    expect(json).not.toContain("平均 ACU");
   });
 });

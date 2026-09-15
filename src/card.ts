@@ -114,7 +114,7 @@ export function buildReportCard(args: {
             tag: "div",
             text: {
               tag: "lark_md",
-              content: `<font color='grey'>更新于 ${formatTimestamp(timezone)}　有疑问找</font>`,
+              content: "<font color='grey'>有疑问找</font>",
               text_size: "notation",
               text_align: "right",
             },
@@ -134,6 +134,21 @@ export function buildReportCard(args: {
             show_avatar: true,
             show_name: true,
             style: "capsule",
+          },
+        ],
+      },
+      {
+        tag: "column",
+        width: "auto",
+        vertical_align: "center",
+        elements: [
+          {
+            tag: "div",
+            text: {
+              tag: "lark_md",
+              content: `<font color='grey'>卡片更新于 ${formatUpdateTime(timezone)}</font>`,
+              text_size: "notation",
+            },
           },
         ],
       },
@@ -291,42 +306,83 @@ function reportElements(
   projectColors: ProjectColors,
 ): CardElement[] {
   const { period, video, live } = report;
+  const hasLiveData = hasCumulativeLiveData(live.cumulative);
   const color = colorFor(period.projectId, projectColors);
   const heading = `<text_tag color='${color}'>${safeMarkdownText(period.projectDisplayName)}</text_tag> **${safeMarkdownText(period.period)}**`;
   const headingElements: CardElement[] = showHeading
     ? [{ tag: "div", text: { tag: "lark_md", content: heading, text_size: "heading" } }]
     : [];
+  const dailyMetricColumns: CardElement[] = [
+    highlightMetric(
+      "▶ 今日视频新增",
+      video.today.playCount,
+      `稿件 ${formatNumber(video.today.contentCount)}丨作者 ${formatNumber(video.today.authorCount)}`,
+      metricTones.video,
+      true,
+    ),
+    highlightMetric(
+      "昨日视频新增",
+      video.yesterday.playCount,
+      `稿件 ${formatNumber(video.yesterday.contentCount)}丨作者 ${formatNumber(video.yesterday.authorCount)}`,
+      metricTones.content,
+      true,
+    ),
+    ...(hasLiveData
+      ? [
+          highlightMetric(
+            "◉ 今日新增直播",
+            `${formatNumber(live.today.liveSessionCount)} 场`,
+            `${formatNumber(live.today.anchorCount)} 位主播`,
+            metricTones.live,
+          ),
+          highlightMetric(
+            "昨日新增直播",
+            `${formatNumber(live.yesterday.liveSessionCount)} 场`,
+            `${formatNumber(live.yesterday.anchorCount)} 位主播`,
+            metricTones.activity,
+          ),
+        ]
+      : []),
+  ];
   const dailyMetrics: CardElement[] = [
-    dailyMetricRow(
-      highlightMetric(
-        "▶ 今日视频新增",
-        video.today.playCount,
-        `稿件 ${formatNumber(video.today.contentCount)} · 作者 ${formatNumber(video.today.authorCount)}`,
-        metricTones.video,
-        true,
-      ),
-      highlightMetric(
-        "昨日视频新增",
-        video.yesterday.playCount,
-        `稿件 ${formatNumber(video.yesterday.contentCount)} · 作者 ${formatNumber(video.yesterday.authorCount)}`,
-        metricTones.video,
-        true,
-      ),
+    {
+      tag: "column_set",
+      flex_mode: hasLiveData ? "flow" : "bisect",
+      horizontal_spacing: "6px",
+      margin: "2px 0",
+      columns: dailyMetricColumns,
+    },
+  ];
+  const cumulativeMetrics: CardElement[] = [
+    summaryMetric("本期播放", video.cumulative.playCount, metricTones.video),
+    summaryMetric(
+      "稿件 / 作者",
+      `${formatNumber(video.cumulative.contentCount)} / ${formatNumber(video.cumulative.authorCount)}`,
+      metricTones.content,
     ),
-    dailyMetricRow(
-      highlightMetric(
-        "◉ 今日新增直播",
-        `${formatNumber(live.today.liveSessionCount)} 场`,
-        `${formatNumber(live.today.anchorCount)} 位主播`,
-        metricTones.live,
-      ),
-      highlightMetric(
-        "昨日新增直播",
-        `${formatNumber(live.yesterday.liveSessionCount)} 场`,
-        `${formatNumber(live.yesterday.anchorCount)} 位主播`,
-        metricTones.live,
-      ),
-    ),
+    ...(hasLiveData
+      ? [
+          summaryMetric("直播PV", live.cumulative.liveExposurePv, metricTones.live),
+          summaryMetric(
+            "场次 / 主播",
+            `${formatNumber(live.cumulative.liveSessionCount)} / ${formatNumber(live.cumulative.anchorCount)}`,
+            metricTones.activity,
+          ),
+        ]
+      : []),
+  ];
+  const secondaryMetrics: CardElement[] = [
+    summaryMetric("点赞", video.cumulative.likeCount, metricTones.video),
+    summaryMetric("评论", video.cumulative.commentCount, metricTones.content),
+    ...(hasLiveData
+      ? [
+          summaryMetric(
+            "平均 ACU",
+            live.cumulative.avgAcu === null ? "—" : formatNumber(live.cumulative.avgAcu),
+            metricTones.live,
+          ),
+        ]
+      : []),
   ];
 
   if (showHeading) {
@@ -338,7 +394,7 @@ function reportElements(
         margin: "2px 0 6px 0",
         text: {
           tag: "lark_md",
-          content: `**本期累计**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}\n直播PV ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}`,
+          content: `**本期累计**　播放 ${formatNumber(video.cumulative.playCount)}　·　稿件 ${formatNumber(video.cumulative.contentCount)}　·　作者 ${formatNumber(video.cumulative.authorCount)}${hasLiveData ? `\n直播PV ${formatNumber(live.cumulative.liveExposurePv)}　·　场次 ${formatNumber(live.cumulative.liveSessionCount)}　·　主播 ${formatNumber(live.cumulative.anchorCount)}` : ""}`,
           text_size: "notation",
         },
       },
@@ -354,29 +410,14 @@ function reportElements(
       flex_mode: "bisect",
       horizontal_spacing: "6px",
       margin: "2px 0",
-      columns: [
-        summaryMetric("本期播放", video.cumulative.playCount, metricTones.video),
-        summaryMetric(
-          "稿件 / 作者",
-          `${formatNumber(video.cumulative.contentCount)} / ${formatNumber(video.cumulative.authorCount)}`,
-          metricTones.content,
-        ),
-        summaryMetric("直播PV", live.cumulative.liveExposurePv, metricTones.live),
-        summaryMetric(
-          "场次 / 主播",
-          `${formatNumber(live.cumulative.liveSessionCount)} / ${formatNumber(live.cumulative.anchorCount)}`,
-          metricTones.activity,
-        ),
-      ],
+      columns: cumulativeMetrics,
     },
     {
-      tag: "div",
-      margin: "2px 0 8px 0",
-      text: {
-        tag: "lark_md",
-        content: `<font color='grey'>点赞 ${formatNumber(video.cumulative.likeCount)}　·　评论 ${formatNumber(video.cumulative.commentCount)}　·　平均 ACU ${live.cumulative.avgAcu === null ? "—" : formatNumber(live.cumulative.avgAcu)}</font>`,
-        text_size: "notation",
-      },
+      tag: "column_set",
+      flex_mode: hasLiveData ? "trisect" : "bisect",
+      horizontal_spacing: "6px",
+      margin: "4px 0 8px 0",
+      columns: secondaryMetrics,
     },
     {
       tag: "div",
@@ -388,16 +429,6 @@ function reportElements(
     },
     ...topGrowthElements(video.topGrowth, timezone, rankingMode),
   ];
-}
-
-function dailyMetricRow(first: CardElement, second: CardElement): CardElement {
-  return {
-    tag: "column_set",
-    flex_mode: "bisect",
-    horizontal_spacing: "8px",
-    margin: "2px 0",
-    columns: [first, second],
-  };
 }
 
 function highlightMetric(
@@ -457,8 +488,8 @@ function compactTopGrowthElement(
     const title = middleTruncate(item.title || `视频 ${item.videoId}`, 10, 10);
     const videoUrl = `https://www.douyin.com/video/${encodeURIComponent(item.videoId)}`;
     const publishedAt = formatPublishTime(item.publishTime, timezone);
-    const cumulative = item.latestPlayCount === null ? "" : `　·　累计播放 ${formatNumber(item.latestPlayCount)}`;
-    return `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})　**+${formatNumber(item.playGrowth)}**\n<font color='grey'>${safeMarkdownText(item.authorName || "未知作者")}　·　发布 ${publishedAt}${cumulative}　·　${growthLabel}</font>`;
+    const cumulative = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
+    return `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})　**+${formatNumber(item.playGrowth)}**\n<font color='grey'>${safeMarkdownText(item.authorName || "未知作者")}丨发布 ${publishedAt}${cumulative}丨${growthLabel}</font>`;
   });
 
   return {
@@ -506,6 +537,13 @@ function summaryMetric(
   };
 }
 
+function hasCumulativeLiveData(summary: PeriodReport["live"]["cumulative"]): boolean {
+  return summary.liveExposurePv !== 0 ||
+    summary.liveSessionCount !== 0 ||
+    summary.anchorCount !== 0 ||
+    summary.avgAcu !== null;
+}
+
 function topGrowthElements(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
@@ -525,8 +563,8 @@ function topGrowthElements(
     const title = middleTruncate(item.title || `视频 ${item.videoId}`, 10, 10);
     const videoUrl = `https://www.douyin.com/video/${encodeURIComponent(item.videoId)}`;
     const publishedAt = formatPublishTime(item.publishTime, timezone);
-    const latest = item.latestPlayCount === null ? "" : `　·　累计播放 ${formatNumber(item.latestPlayCount)}`;
-    const meta = `${item.authorName || "未知作者"}　·　发布 ${publishedAt}${latest}`;
+    const latest = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
+    const meta = `${item.authorName || "未知作者"}丨发布 ${publishedAt}${latest}`;
     const growthLabel = rankingMode === "today" ? "今日新增" : "本期新增";
     return {
       tag: "column_set",
@@ -632,11 +670,9 @@ function formatPublishTime(value: string, timezone: string): string {
   }).format(date);
 }
 
-function formatTimestamp(timezone: string): string {
+function formatUpdateTime(timezone: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     timeZone: timezone,
-    month: "2-digit",
-    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
