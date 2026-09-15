@@ -10,6 +10,8 @@ import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-s
 import { dateInTimezone, ReportService } from "./report-service.ts";
 import type { CardJson, CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
 
+const LOADING_CARD_DELAY_MS = 2_600;
+
 const actionValueSchema = z.object({
   action: z.enum([
     "select_period",
@@ -58,6 +60,7 @@ export function createCardActionHandler(
   projectIcons: ProjectIcons = {},
   recallMessage?: (messageId: string) => Promise<void>,
   updateCard?: (messageId: string, card: CardJson) => Promise<void>,
+  loadingCardDelayMs = LOADING_CARD_DELAY_MS,
 ) {
   return async (event: LongConnectionCardActionEvent): Promise<CardActionResponse> => {
     try {
@@ -172,10 +175,21 @@ export function createCardActionHandler(
       });
       const messageId = event.context?.open_message_id ?? event.open_message_id;
       if (updateCard && messageId) {
-        void updateCardInBackground(messageId, state, buildResponse, updateCard, timezone);
+        const responsePromise = buildResponse();
+        const result = await waitForCardResponse(responsePromise, loadingCardDelayMs);
+        if (result.status === "complete") return result.response;
+        if (result.status === "failed") {
+          console.error("[lark] 更新卡片数据失败", result.error);
+          const message = result.error instanceof Error ? result.error.message : "数据读取失败，请稍后重试";
+          return {
+            toast: { type: "error", content: "日报更新失败，请重新加载" },
+            card: { type: "raw", data: buildReportUpdateErrorCard(state, message, timezone) },
+          };
+        }
+
+        void updateCardInBackground(messageId, state, responsePromise, updateCard, timezone);
         return {
           toast: { type: "info", content: "正在更新日报" },
-          card: { type: "raw", data: buildLoadingReportCard(state, timezone) },
         };
       }
 
@@ -255,12 +269,18 @@ async function buildActionResponse(args: {
 async function updateCardInBackground(
   messageId: string,
   state: CardViewState,
-  buildResponse: () => Promise<CardActionResponse>,
+  responsePromise: Promise<CardActionResponse>,
   updateCard: (messageId: string, card: CardJson) => Promise<void>,
   timezone: string,
 ): Promise<void> {
   try {
-    const response = await buildResponse();
+    await updateCard(messageId, buildLoadingReportCard(state, timezone));
+  } catch (error) {
+    console.error("[lark] 写入卡片加载状态失败", error);
+  }
+
+  try {
+    const response = await responsePromise;
     if (response.card) await updateCard(messageId, response.card.data);
   } catch (error) {
     console.error("[lark] 后台更新卡片失败", error);
@@ -271,6 +291,27 @@ async function updateCardInBackground(
       console.error("[lark] 写入卡片失败状态失败", updateError);
     }
   }
+}
+
+async function waitForCardResponse(
+  responsePromise: Promise<CardActionResponse>,
+  delayMs: number,
+): Promise<
+  | { status: "complete"; response: CardActionResponse }
+  | { status: "failed"; error: unknown }
+  | { status: "timeout" }
+> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ status: "timeout" }>((resolve) => {
+    timer = setTimeout(() => resolve({ status: "timeout" }), delayMs);
+  });
+  const settled = responsePromise.then(
+    (response) => ({ status: "complete" as const, response }),
+    (error: unknown) => ({ status: "failed" as const, error }),
+  );
+  const result = await Promise.race([settled, timeout]);
+  if (timer) clearTimeout(timer);
+  return result;
 }
 
 function cardToolAction(value: string | undefined): "collapse_card" | "expand_card" | "request_recall" | "toggle_trend" {
