@@ -62,6 +62,7 @@ export class ReportService {
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
     const today = dateInTimezone(this.timezone);
+    const yesterday = previousIsoDate(today);
     const from = period.trackingStartDate ?? period.taskMonth ?? today;
     const configuredEnd = period.trackingEndDate ?? today;
     const to = today < from ? from : minIsoDate(today, configuredEnd);
@@ -78,6 +79,9 @@ export class ReportService {
     const videoTodayPromise = videoConfig
       ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: today })
       : Promise.resolve(emptyVideoSummary());
+    const videoYesterdayPromise = videoConfig
+      ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: yesterday })
+      : Promise.resolve(emptyVideoSummary());
     const topGrowthPromise = videoConfig
       ? this.client.getTopGrowth(
           videoConfig.contentConfigId,
@@ -91,20 +95,33 @@ export class ReportService {
     const liveTodayPromise = liveConfig
       ? this.client.getLiveSummary(liveConfig.contentConfigId, { date: today })
       : Promise.resolve(emptyLiveSummary());
+    const liveYesterdayPromise = liveConfig
+      ? this.client.getLiveSummary(liveConfig.contentConfigId, { date: yesterday })
+      : Promise.resolve(emptyLiveSummary());
 
-    const [videoCumulative, videoToday, topGrowth, liveCumulative, liveToday] = await Promise.all([
+    const [
+      videoCumulative,
+      videoToday,
+      videoYesterday,
+      topGrowth,
+      liveCumulative,
+      liveToday,
+      liveYesterday,
+    ] = await Promise.all([
       videoCumulativePromise,
       videoTodayPromise,
+      videoYesterdayPromise,
       topGrowthPromise,
       liveCumulativePromise,
       liveTodayPromise,
+      liveYesterdayPromise,
     ]);
 
     const value: PeriodReport = {
       period,
-      range: { from, to, today },
-      video: { cumulative: videoCumulative, today: videoToday, topGrowth },
-      live: { cumulative: liveCumulative, today: liveToday },
+      range: { from, to, today, yesterday },
+      video: { cumulative: videoCumulative, today: videoToday, yesterday: videoYesterday, topGrowth },
+      live: { cumulative: liveCumulative, today: liveToday, yesterday: liveYesterday },
     };
     this.reportCache.set(cacheKey, { value, expiresAt: Date.now() + this.cacheTtlMs });
     return value;
@@ -138,6 +155,12 @@ export function dateInTimezone(timezone: string, date = new Date()): string {
   }).formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
   return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+export function previousIsoDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year!, month! - 1, day! - 1));
+  return date.toISOString().slice(0, 10);
 }
 
 function minIsoDate(a: string, b: string): string {

@@ -35,10 +35,16 @@ const oldPeriod: ProjectPeriod = {
 function report(period: ProjectPeriod): PeriodReport {
   return {
     period,
-    range: { from: "2026-09-01", to: "2026-09-14", today: "2026-09-14" },
+    range: {
+      from: "2026-09-01",
+      to: "2026-09-14",
+      today: "2026-09-14",
+      yesterday: "2026-09-13",
+    },
     video: {
-      cumulative: { playCount: 9000, likeCount: 800, commentCount: 70, contentCount: 20, authorCount: 9 },
-      today: { playCount: 1200, likeCount: 90, commentCount: 8, contentCount: 5, authorCount: 4 },
+      cumulative: { playCount: 221_400, likeCount: 800, commentCount: 70, contentCount: 20, authorCount: 9 },
+      today: { playCount: 12_040, likeCount: 90, commentCount: 8, contentCount: 5, authorCount: 4 },
+      yesterday: { playCount: 9_800, likeCount: 70, commentCount: 6, contentCount: 3, authorCount: 2 },
       topGrowth: Array.from({ length: 7 }, (_, index) => ({
         contentConfigId: 15,
         videoId: `video-${index}`,
@@ -56,6 +62,7 @@ function report(period: ProjectPeriod): PeriodReport {
     live: {
       cumulative: { liveExposurePv: 12000, avgAcu: 11.2, liveSessionCount: 30, anchorCount: 8 },
       today: { liveExposurePv: 900, avgAcu: 12, liveSessionCount: 3, anchorCount: 2 },
+      yesterday: { liveExposurePv: 750, avgAcu: 10, liveSessionCount: 2, anchorCount: 1 },
     },
   };
 }
@@ -84,13 +91,19 @@ describe("buildReportCard", () => {
     expect(json).toContain('"light_mode":"rgba(240,246,255,0.88)"');
     expect(json).toContain('"flex_mode":"flow"');
     expect(json).toContain('"flex_mode":"bisect"');
-    expect(json).toContain("累计播放 2,000");
+    expect(json).toContain("累计播放 2000");
+    expect(json).toContain("22.1w");
+    expect(json).toContain("+1.2w");
+    expect(json).not.toContain("221,400");
     expect(json).toContain("今日新增");
+    expect(json).toContain("昨日视频新增");
+    expect(json).toContain("昨日直播曝光");
+    expect(json).toContain("统计区间 2026-09-01 — 2026-09-14");
+    expect(json).not.toContain("今日增长与本期进度");
     expect(json).not.toContain("<text_align");
     expect(json).not.toContain("视频排行范围");
-    expect(json).not.toContain("今日直播曝光");
-    expect(json).toContain("3 场");
-    expect(json).toContain("2 位主播");
+    expect(json).toContain("今日直播曝光");
+    expect(json).toContain("场次 3 · 主播 2");
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
   });
@@ -104,11 +117,15 @@ describe("buildReportCard", () => {
     const header = card.header as Record<string, unknown>;
     expect(header.template).toBe("yellow");
     expect(header.title).toEqual({ tag: "plain_text", content: "万国26年9月第十六期" });
+    expect(header.subtitle).toEqual({
+      tag: "plain_text",
+      content: "统计区间 2026-09-01 — 2026-09-14",
+    });
+    expect(header.text_tag_list).toBeUndefined();
     const json = JSON.stringify(card);
     expect(json).toContain("本期增长 · 视频播放 Top 5");
     expect(json).toContain("本期新增");
-    expect(json).toContain("[ROK]生态");
-    expect(json).not.toContain("\\[ROK\\]生态");
+    expect(json).not.toContain("<text_tag");
   });
 
   test("交互组件携带期次和排行视图状态", () => {
@@ -123,5 +140,58 @@ describe("buildReportCard", () => {
     expect(json).toContain('"action":"show_latest"');
     expect(json).toContain('"action":"set_ranking"');
     expect(json).toContain("所有项目");
+  });
+
+  test("超过四个项目时隐藏所有项目按钮", () => {
+    const manyPeriods = Array.from({ length: 5 }, (_, index): ProjectPeriod => ({
+      ...periods[0]!,
+      activityPeriodId: 100 + index,
+      projectId: 100 + index,
+      projectDisplayName: `项目${index + 1}`,
+      period: `项目${index + 1}日报`,
+    }));
+    const card = buildReportCard({
+      reports: [report(manyPeriods[0]!)],
+      allPeriods: manyPeriods,
+      state: { scope: "period", periodIds: manyPeriods.map((item) => item.activityPeriodId), rankingMode: "today" },
+    });
+    expect(JSON.stringify(card)).not.toContain("所有项目");
+  });
+
+  test("静态卡片不包含切换控件或回调", () => {
+    const card = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      interactive: false,
+    });
+    const json = JSON.stringify(card);
+    expect((card.config as Record<string, unknown>).update_multi).toBe(false);
+    expect(json).not.toContain('"callback"');
+    expect(json).not.toContain('"select_static"');
+    expect(json).not.toContain("所有项目");
+    expect(json).not.toContain("[ROK]生态");
+  });
+
+  test("项目颜色配置覆盖默认卡片主题和标签色", () => {
+    const singleCard = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      projectColors: { 1: "red" },
+    });
+    expect((singleCard.header as Record<string, unknown>).template).toBe("red");
+
+    const combinedCard = buildReportCard({
+      reports: periods.map(report),
+      allPeriods: periods,
+      state: { scope: "combined", periodIds: [10, 11], rankingMode: "today" },
+      projectColors: { 1: "red", 2: "orange" },
+    });
+    const json = JSON.stringify(combinedCard);
+    expect(json).toContain("<text_tag color='red'>");
+    expect(json).toContain("<text_tag color='orange'>");
+    expect(json).toContain('"color":"red"');
+    expect(json).toContain('"color":"orange"');
   });
 });

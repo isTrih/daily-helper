@@ -1,4 +1,20 @@
 import { z } from "zod";
+import type { CardColor, ProjectColors } from "./types.ts";
+
+const cardColors = new Set<CardColor>([
+  "blue",
+  "wathet",
+  "turquoise",
+  "green",
+  "yellow",
+  "orange",
+  "red",
+  "carmine",
+  "violet",
+  "purple",
+  "indigo",
+  "grey",
+]);
 
 const booleanFromEnv = z
   .string()
@@ -13,6 +29,7 @@ const envSchema = z.object({
   XINGTU_API_BASE: z.string().url().default("https://autoxingtu.api.ali.trih.top"),
   XINGTU_API_TOKEN: z.string().trim().optional(),
   PROJECT_ORDER: z.string().trim().default(""),
+  COLOR: z.string().trim().default(""),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   AUTO_DAILY_REPORT_ENABLED: booleanFromEnv,
@@ -30,6 +47,16 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       .map((value) => Number(value.trim()))
       .filter((value) => Number.isSafeInteger(value) && value > 0),
   )];
+  const projectColors = parsed.COLOR.split(",").reduce<ProjectColors>((colors, entry) => {
+    const match = /^(\d+)\s*-\s*([a-z]+)$/i.exec(entry.trim());
+    if (!match) return colors;
+    const projectId = Number(match[1]);
+    const color = match[2]!.toLowerCase() as CardColor;
+    if (projectId > 0 && Number.isSafeInteger(projectId) && cardColors.has(color)) {
+      colors[projectId] = color;
+    }
+    return colors;
+  }, {});
 
   return {
     host: parsed.HOST,
@@ -39,6 +66,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       token: parsed.XINGTU_API_TOKEN || undefined,
     },
     projectOrder,
+    projectColors,
     lark: {
       appId: parsed.LARK_APP_ID || undefined,
       appSecret: parsed.LARK_APP_SECRET || undefined,

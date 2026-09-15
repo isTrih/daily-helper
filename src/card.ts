@@ -1,12 +1,11 @@
-import type { CardJson, CardViewState, PeriodReport, ProjectPeriod } from "./types.ts";
+import type { CardColor, CardJson, CardViewState, PeriodReport, ProjectColors, ProjectPeriod } from "./types.ts";
 
 type CardElement = Record<string, unknown>;
-type Theme = "blue" | "yellow" | "purple" | "green";
 
-const projectStyle: Record<number, { theme: Theme; tag: string }> = {
-  1: { theme: "yellow", tag: "yellow" },
-  2: { theme: "purple", tag: "purple" },
-  3: { theme: "green", tag: "green" },
+const defaultProjectColors: ProjectColors = {
+  1: "yellow",
+  2: "purple",
+  3: "green",
 };
 
 const metricTones = {
@@ -53,37 +52,39 @@ const cardColorStyle = {
   },
 };
 
-const numberFormat = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
-
 export function buildReportCard(args: {
   reports: PeriodReport[];
   allPeriods: ProjectPeriod[];
   state: CardViewState;
   timezone?: string;
+  interactive?: boolean;
+  projectColors?: ProjectColors;
 }): CardJson {
   const { reports, allPeriods, state } = args;
   if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
 
   const timezone = args.timezone ?? "Asia/Shanghai";
+  const interactive = args.interactive ?? true;
+  const projectColors = args.projectColors ?? {};
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
-  const theme = focusedReport ? styleFor(focusedReport.period.projectId).theme : "blue";
+  const isCombined = state.scope === "combined" && reports.length > 1;
+  const theme = focusedReport ? colorFor(focusedReport.period.projectId, projectColors) : "blue";
   const title = focusedReport ? focusedReport.period.period : "项目每日速览";
-  const subtitle = `${reports[0]!.range.today} · 今日增长与本期进度`;
-  const tags = reports.slice(0, 3).map((report) => ({
+  const subtitle = `统计区间 ${reports[0]!.range.from} — ${reports[0]!.range.to}`;
+  const tags = (isCombined ? reports.slice(0, 3) : []).map((report) => ({
     tag: "text_tag",
     text: { tag: "plain_text", content: report.period.projectDisplayName },
-    color: styleFor(report.period.projectId).tag,
+    color: colorFor(report.period.projectId, projectColors),
   }));
 
-  const elements: CardElement[] = [
-    ...controls(allPeriods, state),
-    { tag: "hr", margin: "4px 0 8px 0" },
-  ];
+  const elements: CardElement[] = interactive
+    ? [...controls(allPeriods, state), { tag: "hr", margin: "4px 0 8px 0" }]
+    : [];
 
   // 原始卡片 JSON 2.0 不支持模板循环，这里在服务端稳定展开每个项目的 Top 5。
   for (const [index, report] of reports.entries()) {
     if (index > 0) elements.push({ tag: "hr", margin: "12px 0" });
-    elements.push(...reportElements(report, state.rankingMode, timezone, reports.length > 1));
+    elements.push(...reportElements(report, state.rankingMode, timezone, isCombined, projectColors));
   }
 
   elements.push({
@@ -100,7 +101,7 @@ export function buildReportCard(args: {
   return {
     schema: "2.0",
     config: {
-      update_multi: true,
+      update_multi: interactive,
       enable_forward: true,
       enable_forward_interaction: false,
       width_mode: "fill",
@@ -111,7 +112,7 @@ export function buildReportCard(args: {
       template: theme,
       title: { tag: "plain_text", content: title },
       subtitle: { tag: "plain_text", content: subtitle },
-      text_tag_list: tags,
+      ...(tags.length > 0 ? { text_tag_list: tags } : {}),
       icon: { tag: "standard_icon", token: "chart-pie_outlined" },
       padding: "12px",
     },
@@ -174,18 +175,22 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
             },
           ],
         },
-        {
-          tag: "column",
-          width: "weighted",
-          weight: 1,
-          padding: "8px 0",
-          elements: [
-            button("所有项目", "view_latest", {
-              action: "show_latest",
-              ranking_mode: state.rankingMode,
-            }),
-          ],
-        },
+        ...(availablePeriods.length <= 4
+          ? [
+              {
+                tag: "column",
+                width: "weighted",
+                weight: 1,
+                padding: "8px 0",
+                elements: [
+                  button("所有项目", "view_latest", {
+                    action: "show_latest",
+                    ranking_mode: state.rankingMode,
+                  }),
+                ],
+              },
+            ]
+          : []),
         {
           tag: "column",
           width: "weighted",
@@ -238,52 +243,54 @@ function reportElements(
   report: PeriodReport,
   rankingMode: CardViewState["rankingMode"],
   timezone: string,
-  compact: boolean,
+  showHeading: boolean,
+  projectColors: ProjectColors,
 ): CardElement[] {
-  const { period, range, video, live } = report;
-  const style = styleFor(period.projectId);
-  const heading = `<text_tag color='${style.tag}'>${safeMarkdownText(period.projectDisplayName)}</text_tag> **${safeMarkdownText(period.period)}**`;
-  const headingElements: CardElement[] = [
-    {
-      tag: "div",
-      text: { tag: "lark_md", content: heading, text_size: "heading" },
-    },
-    {
-      tag: "div",
-      margin: "0 0 2px 0",
-      text: {
-        tag: "lark_md",
-        content: `<font color='grey'>统计区间 ${range.from} — ${range.to}</font>`,
-        text_size: "notation",
-      },
-    },
-  ];
-  const todayMetrics: CardElement = {
-    tag: "column_set",
-    flex_mode: "bisect",
-    horizontal_spacing: "8px",
-    margin: "2px 0 2px 0",
-    columns: [
+  const { period, video, live } = report;
+  const color = colorFor(period.projectId, projectColors);
+  const heading = `<text_tag color='${color}'>${safeMarkdownText(period.projectDisplayName)}</text_tag> **${safeMarkdownText(period.period)}**`;
+  const headingElements: CardElement[] = showHeading
+    ? [{ tag: "div", text: { tag: "lark_md", content: heading, text_size: "heading" } }]
+    : [];
+  const dailyMetrics: CardElement[] = [
+    dailyMetricRow(
       highlightMetric(
-        "▶ 今日播放新增",
+        "▶ 今日视频新增",
         video.today.playCount,
-        `今日稿件 ${formatNumber(video.today.contentCount)} · 作者 ${formatNumber(video.today.authorCount)}`,
+        `稿件 ${formatNumber(video.today.contentCount)} · 作者 ${formatNumber(video.today.authorCount)}`,
         metricTones.video,
         true,
       ),
       highlightMetric(
-        "◉ 今日直播",
-        `${formatNumber(live.today.liveSessionCount)} 场`,
-        `${formatNumber(live.today.anchorCount)} 位主播`,
-        metricTones.live,
+        "昨日视频新增",
+        video.yesterday.playCount,
+        `稿件 ${formatNumber(video.yesterday.contentCount)} · 作者 ${formatNumber(video.yesterday.authorCount)}`,
+        metricTones.video,
+        true,
       ),
-    ],
-  };
+    ),
+    dailyMetricRow(
+      highlightMetric(
+        "◉ 今日直播曝光",
+        live.today.liveExposurePv,
+        `场次 ${formatNumber(live.today.liveSessionCount)} · 主播 ${formatNumber(live.today.anchorCount)}`,
+        metricTones.live,
+        true,
+      ),
+      highlightMetric(
+        "昨日直播曝光",
+        live.yesterday.liveExposurePv,
+        `场次 ${formatNumber(live.yesterday.liveSessionCount)} · 主播 ${formatNumber(live.yesterday.anchorCount)}`,
+        metricTones.live,
+        true,
+      ),
+    ),
+  ];
 
-  if (compact) {
+  if (showHeading) {
     return [
       ...headingElements,
-      todayMetrics,
+      ...dailyMetrics,
       {
         tag: "div",
         margin: "2px 0 6px 0",
@@ -299,7 +306,7 @@ function reportElements(
 
   return [
     ...headingElements,
-    todayMetrics,
+    ...dailyMetrics,
     {
       tag: "column_set",
       flex_mode: "bisect",
@@ -339,6 +346,16 @@ function reportElements(
     },
     ...topGrowthElements(video.topGrowth, timezone, rankingMode),
   ];
+}
+
+function dailyMetricRow(first: CardElement, second: CardElement): CardElement {
+  return {
+    tag: "column_set",
+    flex_mode: "bisect",
+    horizontal_spacing: "8px",
+    margin: "2px 0",
+    columns: [first, second],
+  };
 }
 
 function highlightMetric(
@@ -521,8 +538,8 @@ function latestPeriodPerProject(periods: ProjectPeriod[]): ProjectPeriod[] {
   return periods.filter((period) => latestByProject.get(period.projectId)?.activityPeriodId === period.activityPeriodId);
 }
 
-function styleFor(projectId: number): { theme: Theme; tag: string } {
-  return projectStyle[projectId] ?? { theme: "blue", tag: "blue" };
+function colorFor(projectId: number, projectColors: ProjectColors): CardColor {
+  return projectColors[projectId] ?? defaultProjectColors[projectId] ?? "blue";
 }
 
 function periodOptionText(period: ProjectPeriod): string {
@@ -530,7 +547,8 @@ function periodOptionText(period: ProjectPeriod): string {
 }
 
 function formatNumber(value: number): string {
-  return numberFormat.format(value);
+  if (Math.abs(value) >= 10_000) return `${(value / 10_000).toFixed(1)}w`;
+  return String(Math.round(value * 10) / 10);
 }
 
 function middleTruncate(value: string, headLength: number, tailLength: number): string {

@@ -5,12 +5,12 @@
 ## 已实现
 
 - 默认按 `project_id` 分组，只取数值最大的 `activity_period_id`。多合一日报初始聚焦 `PROJECT_ORDER` 顺位第一个项目，点击“所有项目”后展开全部项目。
-- 同时展示本期累计与今日新增：视频播放、点赞、评论、稿件、作者，以及直播曝光、平均 ACU、场次、主播。
+- 同时展示本期累计与今日、昨日新增：视频播放、点赞、评论、稿件、作者，以及直播曝光、平均 ACU、场次、主播。
 - 使用 `/api/v1/queries/videos/top-growth` 展示每项目 5 条今日或本期播放增长最快的视频。
 - 卡片 JSON 2.0，下拉框只列出每个项目最大的期次；“所有项目 / 今日增长 / 本期增长”在宽屏同排展示、窄屏自动换行。“所有项目”使用紧凑视图避免超过飞书组件上限，视频标题可点击打开抖音播放页，并通过 `card.action.trigger` 长连接在 3 秒内立即返回新卡片。
 - 网页读取当前机器人所在群聊，可配置多合一或单独日报、勾选项目、切换期次、预览并发送。
 - 环境变量指定默认自动发送群，Cron 定时发送所有项目的最新期次。
-- 单独日报使用接口返回的 `period` 作为标题，`project_display_name` 作为标题标签；项目 1/2/3 分别使用金色（飞书 `yellow`）、紫色和绿色主题。
+- 单独日报使用接口返回的 `period` 作为标题，发布为无切换控件的静态卡片；项目 1/2/3 分别使用金色（飞书 `yellow`）、紫色和绿色主题。
 
 > 飞书 Card JSON 2.0 的 raw JSON 不支持“循环容器”（该组件只在 CardKit 搭建模板中可用）。项目没有提供 CardKit 模板 ID，因此本项目在服务端用数组循环展开标准 JSON 2.0 组件，实际效果和数据条数一致，也避免部署前还要手工发布模板。
 
@@ -42,6 +42,7 @@ LARK_APP_ID=cli_xxxxxxxxxxxxxxxx
 LARK_APP_SECRET=xxxxxxxxxxxxxxxx
 LARK_DEFAULT_CHAT_ID=oc_xxxxxxxxxxxxxxxx
 PROJECT_ORDER=3,1,2
+COLOR=1-yellow,2-purple,3-blue,4-orange
 ```
 
 常用配置：
@@ -51,6 +52,7 @@ PROJECT_ORDER=3,1,2
 | `XINGTU_API_BASE`              | `https://autoxingtu.api.ali.trih.top` | 星图 API 根地址                                       |
 | `XINGTU_API_TOKEN`             | 空                                    | 可选 Bearer Token                                     |
 | `PROJECT_ORDER`                | 空                                    | project_id 展示顺序，如 `3,1,2`；未列出的项目自动追加 |
+| `COLOR`                        | 空                                    | 项目主题色，如 `1-yellow,2-purple,3-blue`；支持 `blue`、`wathet`、`turquoise`、`green`、`yellow`、`orange`、`red`、`carmine`、`violet`、`purple`、`indigo`、`grey` |
 | `PORT` / `HOST`                | `3000` / `0.0.0.0`                    | 管理页监听地址                                        |
 | `LARK_LONG_CONNECTION_ENABLED` | `true`                                | 是否接收卡片长连接回调                                |
 | `AUTO_DAILY_REPORT_ENABLED`    | `true`                                | 是否启用自动日报                                      |

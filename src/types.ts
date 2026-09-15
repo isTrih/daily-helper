@@ -1,5 +1,19 @@
 export type RankingMode = "today" | "period";
 export type ReportMode = "combined" | "single";
+export type CardColor =
+  | "blue"
+  | "wathet"
+  | "turquoise"
+  | "green"
+  | "yellow"
+  | "orange"
+  | "red"
+  | "carmine"
+  | "violet"
+  | "purple"
+  | "indigo"
+  | "grey";
+export type ProjectColors = Record<number, CardColor>;
 
 export interface ProjectPeriod {
   activityPeriodId: number;
@@ -51,15 +65,17 @@ export interface VideoGrowth {
 
 export interface PeriodReport {
   period: ProjectPeriod;
-  range: { from: string; to: string; today: string };
+  range: { from: string; to: string; today: string; yesterday: string };
   video: {
     cumulative: VideoSummary;
     today: VideoSummary;
+    yesterday: VideoSummary;
     topGrowth: VideoGrowth[];
   };
   live: {
     cumulative: LiveSummary;
     today: LiveSummary;
+    yesterday: LiveSummary;
   };
 }
 

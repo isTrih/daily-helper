@@ -24,15 +24,22 @@ const periods: ProjectPeriod[] = [
 function makeReport(period: ProjectPeriod): PeriodReport {
   return {
     period,
-    range: { from: "2026-09-01", to: "2026-09-14", today: "2026-09-14" },
+    range: {
+      from: "2026-09-01",
+      to: "2026-09-14",
+      today: "2026-09-14",
+      yesterday: "2026-09-13",
+    },
     video: {
       cumulative: { playCount: 100, likeCount: 10, commentCount: 2, contentCount: 3, authorCount: 2 },
       today: { playCount: 20, likeCount: 2, commentCount: 1, contentCount: 1, authorCount: 1 },
+      yesterday: { playCount: 15, likeCount: 1, commentCount: 1, contentCount: 1, authorCount: 1 },
       topGrowth: [],
     },
     live: {
       cumulative: { liveExposurePv: 200, avgAcu: 3, liveSessionCount: 4, anchorCount: 2 },
       today: { liveExposurePv: 0, avgAcu: null, liveSessionCount: 1, anchorCount: 1 },
+      yesterday: { liveExposurePv: 50, avgAcu: 2, liveSessionCount: 1, anchorCount: 1 },
     },
   };
 }
@@ -82,5 +89,25 @@ describe("折叠按钮组回调", () => {
     });
     expect(response.toast?.type).toBe("success");
     expect(JSON.stringify(response.card?.data)).toContain("本期增长 · 视频播放 Top 5");
+  });
+
+  test("切换项目后继续使用环境变量颜色", async () => {
+    const handler = createCardActionHandler(
+      fakeReportService as never,
+      "Asia/Shanghai",
+      { 1: "red" },
+    );
+    const response = await handler({
+      action: {
+        tag: "select_static",
+        option: "10",
+        value: {
+          action: "select_period",
+          ranking_mode: "today",
+          period_ids: "53,10",
+        },
+      },
+    });
+    expect((response.card?.data.header as Record<string, unknown>).template).toBe("red");
   });
 });
