@@ -16,6 +16,21 @@ const defaultProjectColors: ProjectColors = {
   3: "green",
 };
 
+const chartPalettes: Record<CardColor, { play: string; fill: string; content: string; author: string }> = {
+  blue: { play: "#3370FF", fill: "#D6E4FF", content: "#85A9FF", author: "#1456F0" },
+  wathet: { play: "#5B8FF9", fill: "#DCE8FF", content: "#A8C5FF", author: "#2E63C6" },
+  turquoise: { play: "#14C2B8", fill: "#D5F5F2", content: "#6FE1D8", author: "#078F88" },
+  green: { play: "#34C759", fill: "#DCF6E2", content: "#8DE5A1", author: "#1F8F3E" },
+  yellow: { play: "#F5B400", fill: "#FFF1BE", content: "#FFD35C", author: "#C98700" },
+  orange: { play: "#F97316", fill: "#FFE4D2", content: "#FDBA74", author: "#C2410C" },
+  red: { play: "#F54A45", fill: "#FFE0DF", content: "#FF9B98", author: "#C92B27" },
+  carmine: { play: "#E93D82", fill: "#FCE0EB", content: "#F59ABB", author: "#B51F5C" },
+  violet: { play: "#8B5CF6", fill: "#EDE7FF", content: "#C4B5FD", author: "#6638CC" },
+  purple: { play: "#7C3AED", fill: "#E9DEFF", content: "#BFA4FF", author: "#5521B5" },
+  indigo: { play: "#4F46E5", fill: "#E2E2FF", content: "#A5B4FC", author: "#312E9F" },
+  grey: { play: "#64748B", fill: "#E7ECF2", content: "#A8B3C2", author: "#334155" },
+};
+
 const metricTones = {
   video: {
     background: "cus-0",
@@ -95,7 +110,14 @@ export function buildReportCard(args: {
   // 原始卡片 JSON 2.0 不支持模板循环，这里在服务端稳定展开每个项目的 Top 5。
   for (const [index, report] of reports.entries()) {
     if (index > 0) elements.push({ tag: "hr", margin: "12px 0" });
-    elements.push(...reportElements(report, state.rankingMode, timezone, isCombined, projectColors));
+    elements.push(...reportElements(
+      report,
+      state.rankingMode,
+      timezone,
+      isCombined,
+      projectColors,
+      state.showTrend === true && reports.length === 1,
+    ));
   }
 
   elements.push({
@@ -356,6 +378,12 @@ function cardToolsOverflow(state: CardViewState, view: "full" | "collapsed"): Ca
         text: { tag: "plain_text", content: view === "full" ? "收起卡片" : "展开卡片" },
         value: view === "full" ? "collapse_card" : "expand_card",
       },
+      ...(state.scope === "period"
+        ? [{
+            text: { tag: "plain_text", content: state.showTrend ? "隐藏趋势图" : "显示趋势图" },
+            value: state.showTrend ? "hide_trend" : "show_trend",
+          }]
+        : []),
       {
         text: { tag: "plain_text", content: "撤回卡片" },
         value: "request_recall",
@@ -382,6 +410,7 @@ function cardStateValue(state: CardViewState): Record<string, string> {
     selected_period_id: state.selectedPeriodId ? String(state.selectedPeriodId) : "",
     enable_forward: String(state.enableForward ?? false),
     enable_forward_interaction: String((state.enableForward ?? false) && (state.enableForwardInteraction ?? false)),
+    show_trend: String(state.showTrend ?? false),
   };
 }
 
@@ -469,6 +498,19 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           weight: 1,
           padding: "8px 0",
           elements: [
+            button("昨日 TOP", "rank_yesterday", {
+              action: "set_ranking",
+              ...actionState,
+              ranking_mode: "yesterday",
+            }, state.rankingMode === "yesterday"),
+          ],
+        },
+        {
+          tag: "column",
+          width: "weighted",
+          weight: 1,
+          padding: "8px 0",
+          elements: [
             button("本期 TOP", "rank_period", {
               action: "set_ranking",
               ...actionState,
@@ -512,6 +554,7 @@ function reportElements(
   timezone: string,
   showHeading: boolean,
   projectColors: ProjectColors,
+  showTrend: boolean,
 ): CardElement[] {
   const { period, video, live } = report;
   const hasLiveData = hasCumulativeLiveData(live.cumulative);
@@ -615,12 +658,13 @@ function reportElements(
       margin: "2px 0",
       columns: cumulativeMetrics,
     },
+    ...(showTrend ? [videoTrendChart(report, color)] : []),
     {
       tag: "div",
       margin: "4px 0 2px 0",
       text: {
         tag: "lark_md",
-        content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**`,
+        content: `**${rankingTitle(rankingMode)} · 视频播放**`,
       },
     },
     ...topGrowthElements(video.topGrowth, timezone, rankingMode),
@@ -668,13 +712,13 @@ function compactTopGrowthElement(
   timezone: string,
   rankingMode: CardViewState["rankingMode"],
 ): CardElement {
-  const growthLabel = rankingMode === "today" ? "今日新增" : "本期新增";
+  const growthLabel = rankingGrowthLabel(rankingMode);
   if (items.length === 0) {
     return {
       tag: "div",
       text: {
         tag: "lark_md",
-        content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
+        content: `**${rankingTitle(rankingMode)} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
       },
     };
   }
@@ -693,7 +737,7 @@ function compactTopGrowthElement(
     tag: "div",
     text: {
       tag: "lark_md",
-      content: `**${rankingMode === "today" ? "今日 TOP" : "本期 TOP"} · 视频播放**\n${rows.join("\n")}`,
+      content: `**${rankingTitle(rankingMode)} · 视频播放**\n${rows.join("\n")}`,
     },
   };
 }
@@ -741,6 +785,92 @@ function hasCumulativeLiveData(summary: PeriodReport["live"]["cumulative"]): boo
     summary.avgAcu !== null;
 }
 
+function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
+  const points = report.video.trend;
+  if (points.length < 2) {
+    return {
+      tag: "div",
+      margin: "4px 0",
+      text: { tag: "plain_text", content: "暂无足够的每日趋势数据", text_color: "grey" },
+    };
+  }
+
+  const palette = chartPalettes[theme];
+  const values = (metric: string, field: "playCount" | "contentCount" | "authorCount") =>
+    points.map((point) => ({ date: point.date.slice(5).replace("-", "/"), metric, value: point[field] }));
+
+  return {
+    tag: "chart",
+    element_id: "video_daily_trend",
+    height: "260px",
+    margin: "8px 0 6px 0",
+    preview: true,
+    chart_spec: {
+      type: "common",
+      title: { visible: true, text: "每日数据趋势" },
+      color: [palette.play, palette.content, palette.author],
+      data: [
+        { id: "play_data", values: values("视频播放", "playCount") },
+        { id: "content_data", values: values("新增稿件", "contentCount") },
+        { id: "author_data", values: values("新增作者", "authorCount") },
+      ],
+      series: [
+        {
+          id: "play_series",
+          type: "area",
+          dataIndex: 0,
+          xField: "date",
+          yField: "value",
+          seriesField: "metric",
+          area: { style: { fill: palette.fill, fillOpacity: 0.72 } },
+          line: { style: { stroke: palette.play, lineWidth: 2 } },
+        },
+        {
+          id: "content_series",
+          type: "line",
+          dataIndex: 1,
+          xField: "date",
+          yField: "value",
+          seriesField: "metric",
+          line: { style: { stroke: palette.content, lineWidth: 2 } },
+          point: { visible: false },
+        },
+        {
+          id: "author_series",
+          type: "line",
+          dataIndex: 2,
+          xField: "date",
+          yField: "value",
+          seriesField: "metric",
+          line: { style: { stroke: palette.author, lineWidth: 2 } },
+          point: { visible: false },
+        },
+      ],
+      axes: [
+        { orient: "bottom", type: "band", label: { visible: true, autoRotate: true, autoHide: true } },
+        {
+          orient: "left",
+          type: "linear",
+          seriesId: ["play_series"],
+          title: { visible: true, text: "视频播放（左轴）" },
+          nice: true,
+        },
+        {
+          orient: "right",
+          type: "linear",
+          seriesId: ["content_series", "author_series"],
+          title: { visible: true, text: "新增稿件 / 作者（右轴）" },
+          grid: { visible: false },
+          nice: true,
+        },
+      ],
+      legends: { visible: true, orient: "bottom" },
+      tooltip: { visible: true },
+      padding: { top: 38, right: 48, bottom: 32, left: 52 },
+    },
+  };
+}
+
 function topGrowthElements(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
@@ -763,7 +893,7 @@ function topGrowthElements(
     const publishedAt = formatPublishTime(item.publishTime, timezone);
     const latest = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
     const meta = `${item.authorName || "未知作者"}丨发布 ${publishedAt}${latest}`;
-    const growthLabel = rankingMode === "today" ? "今日新增" : "本期新增";
+    const growthLabel = rankingGrowthLabel(rankingMode);
     return {
       tag: "column_set",
       flex_mode: "none",
@@ -807,6 +937,18 @@ function topGrowthElements(
 
 function colorFor(projectId: number, projectColors: ProjectColors): CardColor {
   return projectColors[projectId] ?? defaultProjectColors[projectId] ?? "blue";
+}
+
+function rankingTitle(mode: CardViewState["rankingMode"]): string {
+  if (mode === "today") return "今日 TOP";
+  if (mode === "yesterday") return "昨日 TOP";
+  return "本期 TOP";
+}
+
+function rankingGrowthLabel(mode: CardViewState["rankingMode"]): string {
+  if (mode === "today") return "今日新增";
+  if (mode === "yesterday") return "昨日新增";
+  return "本期新增";
 }
 
 function periodOptionText(period: ProjectPeriod): string {

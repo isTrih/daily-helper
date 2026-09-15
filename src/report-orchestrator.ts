@@ -9,6 +9,7 @@ export interface ReportRequest {
   rankingMode: RankingMode;
   enableForward?: boolean;
   enableForwardInteraction?: boolean;
+  showTrend?: boolean;
 }
 
 export interface SendReportRequest extends ReportRequest {
@@ -32,10 +33,11 @@ export class ReportOrchestrator {
     if (requestedIds.length === 0) throw new Error("没有可发送的项目期次");
     const enableForward = request.enableForward ?? false;
     const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
+    const showTrend = request.showTrend ?? false;
 
     if (request.mode === "combined") {
       const initialPeriodId = requestedIds[0]!;
-      const periodReports = await this.reports.buildReports([initialPeriodId], request.rankingMode);
+      const periodReports = await this.reports.buildReports([initialPeriodId], request.rankingMode, showTrend);
       return [
         buildReportCard({
           reports: periodReports,
@@ -47,6 +49,7 @@ export class ReportOrchestrator {
             rankingMode: request.rankingMode,
             enableForward,
             enableForwardInteraction,
+            showTrend,
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
@@ -55,7 +58,7 @@ export class ReportOrchestrator {
       ];
     }
 
-    const periodReports = await this.reports.buildReports(requestedIds, request.rankingMode);
+    const periodReports = await this.reports.buildReports(requestedIds, request.rankingMode, showTrend);
     return periodReports.map((report) =>
       buildReportCard({
         reports: [report],
@@ -70,6 +73,7 @@ export class ReportOrchestrator {
           rankingMode: request.rankingMode,
           enableForward,
           enableForwardInteraction,
+          showTrend,
         },
         timezone: this.timezone,
       }),

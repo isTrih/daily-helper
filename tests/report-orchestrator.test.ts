@@ -17,7 +17,16 @@ function report(period: ProjectPeriod): PeriodReport {
   return {
     period,
     range: { from: "2026-09-01", to: "2026-09-15", today: "2026-09-15", yesterday: "2026-09-14" },
-    video: { cumulative: video, today: video, yesterday: video, topGrowth: [] },
+    video: {
+      cumulative: video,
+      today: video,
+      yesterday: video,
+      topGrowth: [],
+      trend: [
+        { date: "2026-09-14", playCount: 10, contentCount: 1, authorCount: 1 },
+        { date: "2026-09-15", playCount: 20, contentCount: 2, authorCount: 1 },
+      ],
+    },
     live: { cumulative: live, today: live, yesterday: live },
   };
 }
@@ -41,6 +50,7 @@ describe("ReportOrchestrator", () => {
       rankingMode: "today",
       enableForward: true,
       enableForwardInteraction: true,
+      showTrend: true,
     });
 
     expect(cards).toHaveLength(2);
@@ -55,6 +65,7 @@ describe("ReportOrchestrator", () => {
       expect((card.config as Record<string, unknown>).enable_forward).toBe(true);
       expect((card.config as Record<string, unknown>).enable_forward_interaction).toBe(true);
       expect(JSON.stringify(card)).not.toContain('"callback"');
+      expect(JSON.stringify(card)).toContain('"tag":"chart"');
     }
   });
 

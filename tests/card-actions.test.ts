@@ -35,6 +35,10 @@ function makeReport(period: ProjectPeriod): PeriodReport {
       today: { playCount: 20, likeCount: 2, commentCount: 1, contentCount: 1, authorCount: 1 },
       yesterday: { playCount: 15, likeCount: 1, commentCount: 1, contentCount: 1, authorCount: 1 },
       topGrowth: [],
+      trend: [
+        { date: "2026-09-13", playCount: 15, contentCount: 1, authorCount: 1 },
+        { date: "2026-09-14", playCount: 20, contentCount: 1, authorCount: 1 },
+      ],
     },
     live: {
       cumulative: { liveExposurePv: 200, avgAcu: 3, liveSessionCount: 4, anchorCount: 2 },
@@ -141,6 +145,99 @@ describe("折叠按钮组回调", () => {
     });
     expect(response.toast?.type).toBe("success");
     expect(JSON.stringify(response.card?.data)).toContain("本期 TOP · 视频播放");
+  });
+
+  test("昨日 TOP 选项覆盖当前排行模式", async () => {
+    let rankingMode = "";
+    const reportService = {
+      ...fakeReportService,
+      buildReports: async (ids: number[], mode: string) => {
+        rankingMode = mode;
+        return ids.map((id) => makeReport(periods.find((period) => period.activityPeriodId === id)!));
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    const response = await handler({
+      action: {
+        tag: "overflow",
+        option: "rank_yesterday",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+        },
+      },
+    });
+    expect(rankingMode).toBe("yesterday");
+    expect(JSON.stringify(response.card?.data)).toContain("昨日 TOP · 视频播放");
+  });
+
+  test("折叠按钮组可显示和隐藏单期趋势图", async () => {
+    let includeTrend = false;
+    const reportService = {
+      ...fakeReportService,
+      buildReports: async (ids: number[], _mode: string, requestedTrend: boolean) => {
+        includeTrend = requestedTrend;
+        return ids.map((id) => makeReport(periods.find((period) => period.activityPeriodId === id)!));
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    const shown = await handler({
+      action: {
+        tag: "overflow",
+        option: "show_trend",
+        value: {
+          action: "card_tools",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          show_trend: "false",
+        },
+      },
+    });
+    expect(includeTrend).toBe(true);
+    expect(shown.toast?.content).toBe("趋势图已显示");
+    expect(JSON.stringify(shown.card?.data)).toContain('"tag":"chart"');
+    expect(JSON.stringify(shown.card?.data)).toContain("隐藏趋势图");
+
+    const hidden = await handler({
+      action: {
+        tag: "overflow",
+        option: "hide_trend",
+        value: {
+          action: "card_tools",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          show_trend: "true",
+        },
+      },
+    });
+    expect(includeTrend).toBe(false);
+    expect(hidden.toast?.content).toBe("趋势图已隐藏");
+    expect(JSON.stringify(hidden.card?.data)).not.toContain('"tag":"chart"');
+
+    const collapsed = await handler({
+      action: {
+        tag: "overflow",
+        option: "show_trend",
+        value: {
+          action: "card_tools",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,10",
+          selected_period_id: "53",
+          show_trend: "false",
+          return_view: "collapsed",
+        },
+      },
+    });
+    expect(JSON.stringify(collapsed.card?.data)).toContain("日报已收起");
+    expect(JSON.stringify(collapsed.card?.data)).toContain('"show_trend":"true"');
   });
 
   test("切换项目后继续使用环境变量颜色和图标", async () => {

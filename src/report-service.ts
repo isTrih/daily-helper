@@ -1,4 +1,4 @@
-import type { PeriodReport, ProjectPeriod, RankingMode, VideoSummary } from "./types.ts";
+import type { PeriodReport, ProjectPeriod, RankingMode, VideoSummary, VideoTrendPoint } from "./types.ts";
 import { emptyLiveSummary, emptyVideoSummary, XingtuClient } from "./xingtu-client.ts";
 
 interface MetadataCache {
@@ -37,7 +37,7 @@ export class ReportService {
       .sort((a, b) => this.compareProjects(a.projectId, b.projectId));
   }
 
-  async buildReports(periodIds: number[], rankingMode: RankingMode): Promise<PeriodReport[]> {
+  async buildReports(periodIds: number[], rankingMode: RankingMode, includeTrend = false): Promise<PeriodReport[]> {
     const metadata = await this.getMetadata();
     const uniqueIds = [...new Set(periodIds)];
     const byId = new Map(metadata.periods.map((period) => [period.activityPeriodId, period]));
@@ -47,7 +47,7 @@ export class ReportService {
     }
 
     const reports = await Promise.all(
-      uniqueIds.map((id) => this.buildPeriodReport(byId.get(id)!, metadata.contents, rankingMode)),
+      uniqueIds.map((id) => this.buildPeriodReport(byId.get(id)!, metadata.contents, rankingMode, includeTrend)),
     );
     return reports.sort((a, b) => this.compareProjects(a.period.projectId, b.period.projectId));
   }
@@ -56,8 +56,9 @@ export class ReportService {
     period: ProjectPeriod,
     contents: MetadataCache["contents"],
     rankingMode: RankingMode,
+    includeTrend: boolean,
   ): Promise<PeriodReport> {
-    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${dateInTimezone(this.timezone)}`;
+    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${dateInTimezone(this.timezone)}`;
     const cached = this.reportCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
@@ -74,22 +75,30 @@ export class ReportService {
       (item) => item.activityPeriodId === period.activityPeriodId && item.contentType === "live",
     );
 
+    const dailyVideoRequests = new Map<string, Promise<VideoSummary>>();
+    const getDailyVideo = (date: string): Promise<VideoSummary> => {
+      if (!videoConfig) return Promise.resolve(emptyVideoSummary());
+      const existing = dailyVideoRequests.get(date);
+      if (existing) return existing;
+      const request = this.client.getVideoSummary(videoConfig.contentConfigId, { date });
+      dailyVideoRequests.set(date, request);
+      return request;
+    };
+
     const videoCumulativePromise = videoConfig
       ? this.client.getVideoSummary(videoConfig.contentConfigId, { from, to })
       : Promise.resolve(emptyVideoSummary());
-    const videoTodayPromise = videoConfig
-      ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: today })
-      : Promise.resolve(emptyVideoSummary());
-    const videoYesterdayPromise = videoConfig
-      ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: yesterday })
-      : Promise.resolve(emptyVideoSummary());
-    const videoDayBeforeYesterdayPromise = videoConfig
-      ? this.client.getVideoSummary(videoConfig.contentConfigId, { date: dayBeforeYesterday })
-      : Promise.resolve(emptyVideoSummary());
+    const videoTodayPromise = getDailyVideo(today);
+    const videoYesterdayPromise = getDailyVideo(yesterday);
+    const videoDayBeforeYesterdayPromise = getDailyVideo(dayBeforeYesterday);
     const topGrowthPromise = videoConfig
       ? this.client.getTopGrowth(
           videoConfig.contentConfigId,
-          rankingMode === "today" ? { date: today } : { from, to },
+          rankingMode === "today"
+            ? { date: today }
+            : rankingMode === "yesterday"
+              ? { date: yesterday }
+              : { from, to },
           5,
         )
       : Promise.resolve([]);
@@ -102,6 +111,9 @@ export class ReportService {
     const liveYesterdayPromise = liveConfig
       ? this.client.getLiveSummary(liveConfig.contentConfigId, { date: yesterday })
       : Promise.resolve(emptyLiveSummary());
+    const videoTrendPromise = includeTrend && videoConfig
+      ? buildVideoTrend(from, to, getDailyVideo)
+      : Promise.resolve([]);
 
     const [
       videoCumulative,
@@ -112,6 +124,7 @@ export class ReportService {
       liveCumulative,
       liveToday,
       liveYesterday,
+      videoTrend,
     ] = await Promise.all([
       videoCumulativePromise,
       videoTodayPromise,
@@ -121,6 +134,7 @@ export class ReportService {
       liveCumulativePromise,
       liveTodayPromise,
       liveYesterdayPromise,
+      videoTrendPromise,
     ]);
 
     const value: PeriodReport = {
@@ -131,6 +145,7 @@ export class ReportService {
         today: withVideoCountDeltas(videoToday, videoYesterday),
         yesterday: withVideoCountDeltas(videoYesterday, videoDayBeforeYesterday),
         topGrowth,
+        trend: videoTrend,
       },
       live: { cumulative: liveCumulative, today: liveToday, yesterday: liveYesterday },
     };
@@ -155,6 +170,40 @@ export class ReportService {
     if (bIndex >= 0) return 1;
     return a - b;
   }
+}
+
+async function buildVideoTrend(
+  from: string,
+  to: string,
+  getDailyVideo: (date: string) => Promise<VideoSummary>,
+): Promise<VideoTrendPoint[]> {
+  const dates = isoDateRange(from, to).slice(-31);
+  if (dates.length === 0) return [];
+  const previousDate = previousIsoDate(dates[0]!);
+  const summaries = await Promise.all([previousDate, ...dates].map(getDailyVideo));
+  return dates.map((date, index) => {
+    const current = summaries[index + 1]!;
+    const previous = summaries[index]!;
+    const delta = withVideoCountDeltas(current, previous);
+    return {
+      date,
+      playCount: current.playCount,
+      contentCount: delta.contentCount,
+      authorCount: delta.authorCount,
+    };
+  });
+}
+
+function isoDateRange(from: string, to: string): string[] {
+  if (from > to) return [];
+  const values: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    values.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return values;
 }
 
 export function dateInTimezone(timezone: string, date = new Date()): string {

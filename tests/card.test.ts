@@ -62,6 +62,11 @@ function report(period: ProjectPeriod): PeriodReport {
         latestPlayCount: 2000,
         latestStatDate: "2026-09-14",
       })),
+      trend: [
+        { date: "2026-09-12", playCount: 8000, contentCount: 2, authorCount: 1 },
+        { date: "2026-09-13", playCount: 9800, contentCount: 3, authorCount: 2 },
+        { date: "2026-09-14", playCount: 12040, contentCount: 5, authorCount: 4 },
+      ],
     },
     live: {
       cumulative: { liveExposurePv: 12000, avgAcu: 11.2, liveSessionCount: 30, anchorCount: 8 },
@@ -181,6 +186,58 @@ describe("buildReportCard", () => {
     expect(json).toContain('"flex_mode":"flow","horizontal_spacing":"6px","margin":"2px 0","columns"');
   });
 
+  test("昨日排行使用昨日标题和新增口径", () => {
+    const card = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "yesterday" },
+    });
+    const json = JSON.stringify(card);
+    expect(json).toContain("昨日 TOP · 视频播放");
+    expect(json).toContain("昨日新增");
+    expect(json).not.toContain("今日新增</font>");
+  });
+
+  test("单期可显示主题衍生色的左右轴趋势图", () => {
+    const card = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: {
+        scope: "period",
+        periodIds: [10, 11],
+        selectedPeriodId: 10,
+        rankingMode: "today",
+        showTrend: true,
+      },
+      projectColors: { 1: "yellow" },
+    });
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const chart = elements.find((element) => element.tag === "chart")!;
+    const spec = chart.chart_spec as { series: Array<{ id: string; type: string }>; axes: Array<Record<string, unknown>> };
+    expect(chart.height).toBe("260px");
+    expect(spec.series.map((series) => series.type)).toEqual(["area", "line", "line"]);
+    expect(spec.axes).toContainEqual(expect.objectContaining({ orient: "left", seriesId: ["play_series"] }));
+    expect(spec.axes).toContainEqual(expect.objectContaining({
+      orient: "right",
+      seriesId: ["content_series", "author_series"],
+    }));
+    const json = JSON.stringify(card);
+    expect(json).toContain("视频播放（左轴）");
+    expect(json).toContain("新增稿件 / 作者（右轴）");
+    expect(json).toContain("#F5B400");
+    expect(json).toContain("隐藏趋势图");
+    expect(json).toContain('"show_trend":"true"');
+  });
+
+  test("多项目总览不展示单期趋势图", () => {
+    const card = buildReportCard({
+      reports: periods.map(report),
+      allPeriods: periods,
+      state: { scope: "combined", periodIds: [10, 11], rankingMode: "today", showTrend: true },
+    });
+    expect(JSON.stringify(card)).not.toContain('"tag":"chart"');
+  });
+
   test("交互组件携带期次和排行视图状态", () => {
     const card = buildReportCard({
       reports: [report(periods[1]!)],
@@ -206,6 +263,7 @@ describe("buildReportCard", () => {
     expect(json).toContain('"action":"set_ranking"');
     expect(json).toContain("所有项目");
     expect(json).toContain("今日 TOP");
+    expect(json).toContain("昨日 TOP");
     expect(json).toContain("本期 TOP");
   });
 

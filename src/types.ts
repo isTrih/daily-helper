@@ -1,4 +1,4 @@
-export type RankingMode = "today" | "period";
+export type RankingMode = "today" | "yesterday" | "period";
 export type ReportMode = "combined" | "single";
 export type CardColor =
   | "blue"
@@ -64,6 +64,13 @@ export interface VideoGrowth {
   latestStatDate: string | null;
 }
 
+export interface VideoTrendPoint {
+  date: string;
+  playCount: number;
+  contentCount: number;
+  authorCount: number;
+}
+
 export interface PeriodReport {
   period: ProjectPeriod;
   range: { from: string; to: string; today: string; yesterday: string };
@@ -72,6 +79,7 @@ export interface PeriodReport {
     today: VideoSummary;
     yesterday: VideoSummary;
     topGrowth: VideoGrowth[];
+    trend: VideoTrendPoint[];
   };
   live: {
     cumulative: LiveSummary;
@@ -87,6 +95,7 @@ export interface CardViewState {
   rankingMode: RankingMode;
   enableForward?: boolean;
   enableForwardInteraction?: boolean;
+  showTrend?: boolean;
 }
 
 export type CardJson = Record<string, unknown>;

@@ -19,12 +19,13 @@ const actionValueSchema = z.object({
     "cancel_recall",
     "cancel_card_tools",
   ]),
-  ranking_mode: z.enum(["today", "period"]).default("today"),
+  ranking_mode: z.enum(["today", "yesterday", "period"]).default("today"),
   scope: z.enum(["combined", "period"]).optional(),
   period_ids: z.string().optional(),
   selected_period_id: z.string().optional(),
   enable_forward: z.enum(["true", "false"]).default("false"),
   enable_forward_interaction: z.enum(["true", "false"]).default("false"),
+  show_trend: z.enum(["true", "false"]).default("false"),
   return_view: z.enum(["full", "collapsed"]).optional(),
 });
 
@@ -37,6 +38,7 @@ type ActionType =
   | "request_recall"
   | "confirm_recall"
   | "cancel_recall"
+  | "toggle_trend"
   | "open_card_tools"
   | "cancel_card_tools";
 
@@ -67,12 +69,15 @@ export function createCardActionHandler(
       let rankingMode = action.ranking_mode;
       if (action.action === "overflow_action") {
         if (event.action?.option === "rank_today") rankingMode = "today";
+        if (event.action?.option === "rank_yesterday") rankingMode = "yesterday";
         if (event.action?.option === "rank_period") rankingMode = "period";
       }
       const allPeriods = await reportService.listPeriods();
       const originPeriodIds = parsePeriodIds(action.period_ids);
       const enableForward = action.enable_forward === "true";
       const enableForwardInteraction = enableForward && action.enable_forward_interaction === "true";
+      let showTrend = action.show_trend === "true";
+      if (actionType === "toggle_trend") showTrend = event.action?.option === "show_trend";
       let reportPeriodIds: number[];
       let state: CardViewState;
 
@@ -90,6 +95,7 @@ export function createCardActionHandler(
           rankingMode,
           enableForward,
           enableForwardInteraction,
+          showTrend,
         };
       } else if (actionType === "show_latest") {
         if (originPeriodIds.length === 0) throw new Error("卡片未包含可选期次");
@@ -100,6 +106,7 @@ export function createCardActionHandler(
           rankingMode,
           enableForward,
           enableForwardInteraction,
+          showTrend,
         };
       } else {
         const selectedPeriodId = Number(action.selected_period_id);
@@ -115,6 +122,7 @@ export function createCardActionHandler(
             rankingMode,
             enableForward,
             enableForwardInteraction,
+            showTrend,
           };
         } else {
           reportPeriodIds = originPeriodIds;
@@ -125,16 +133,22 @@ export function createCardActionHandler(
             rankingMode,
             enableForward,
             enableForwardInteraction,
+            showTrend,
           };
         }
       }
 
-      const reports = await reportService.buildReports(reportPeriodIds, state.rankingMode);
+      const reports = await reportService.buildReports(
+        reportPeriodIds,
+        state.rankingMode,
+        state.showTrend === true && reportPeriodIds.length === 1,
+      );
       const card = actionType === "collapse_card"
         ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
         : actionType === "request_recall"
           ? buildRecallConfirmationCard({ reports, state, returnView: action.return_view ?? "full" })
-          : (actionType === "cancel_recall" || actionType === "cancel_card_tools" || actionType === "open_card_tools") &&
+          : (actionType === "toggle_trend" || actionType === "cancel_recall" ||
+              actionType === "cancel_card_tools" || actionType === "open_card_tools") &&
               action.return_view === "collapsed"
             ? buildCollapsedReportCard({ reports, state, timezone, projectColors, projectIcons })
             : buildReportCard({ reports, allPeriods, state, timezone, projectColors, projectIcons });
@@ -144,6 +158,8 @@ export function createCardActionHandler(
           ? { type: "success" as const, content: "卡片已展开" }
           : actionType === "request_recall"
             ? { type: "warning" as const, content: "请确认是否撤回" }
+            : actionType === "toggle_trend"
+              ? { type: "success" as const, content: showTrend ? "趋势图已显示" : "趋势图已隐藏" }
             : actionType === "cancel_recall" || actionType === "cancel_card_tools" || actionType === "open_card_tools"
               ? { type: "info" as const, content: actionType === "cancel_recall" ? "已取消撤回" : "卡片操作已更新" }
               : { type: "success" as const, content: "日报视图已更新" };
@@ -163,14 +179,15 @@ export function createCardActionHandler(
   };
 }
 
-function cardToolAction(value: string | undefined): "collapse_card" | "expand_card" | "request_recall" {
+function cardToolAction(value: string | undefined): "collapse_card" | "expand_card" | "request_recall" | "toggle_trend" {
   if (value === "collapse_card" || value === "expand_card" || value === "request_recall") return value;
+  if (value === "show_trend" || value === "hide_trend") return "toggle_trend";
   throw new Error("卡片管理操作无效");
 }
 
 function overflowAction(value: string | undefined): "show_latest" | "set_ranking" {
   if (value === "show_latest") return "show_latest";
-  if (value === "rank_today" || value === "rank_period") return "set_ranking";
+  if (value === "rank_today" || value === "rank_yesterday" || value === "rank_period") return "set_ranking";
   throw new Error("折叠按钮操作无效");
 }
 

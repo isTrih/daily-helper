@@ -156,7 +156,8 @@ function collectRequest() {
   const rankingMode = form.elements.rankingMode.value;
   const enableForward = enableForwardInput.checked;
   const enableForwardInteraction = enableForward && enableForwardInteractionInput.checked;
-  return { periodIds, mode, rankingMode, enableForward, enableForwardInteraction, names };
+  const showTrend = form.elements.showTrend.checked;
+  return { periodIds, mode, rankingMode, enableForward, enableForwardInteraction, showTrend, names };
 }
 
 function syncForwardPermissions() {
