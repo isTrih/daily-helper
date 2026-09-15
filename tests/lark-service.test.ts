@@ -89,6 +89,32 @@ describe("LarkService CardKit 卡片", () => {
     expect(updatedCardId).toBe("card_legacy");
   });
 
+  test("卡片更新序列号使用秒级整数并保持单调递增", async () => {
+    const sequences: number[] = [];
+    const client = {
+      cardkit: {
+        v1: {
+          card: {
+            idConvert: async () => ({ code: 0, msg: "success", data: { card_id: "card_sequence" } }),
+            update: async (payload: { data: { sequence: number } }) => {
+              sequences.push(payload.data.sequence);
+              return { code: 0, msg: "success", data: {} };
+            },
+          },
+        },
+      },
+    };
+    const service = serviceWithClient(client);
+
+    await service.updateCard("om_sequence", { schema: "2.0" });
+    await service.updateCard("om_sequence", { schema: "2.0" });
+
+    expect(sequences).toHaveLength(2);
+    expect(Number.isSafeInteger(sequences[0])).toBe(true);
+    expect(sequences[0]!).toBeLessThanOrEqual(2_147_483_647);
+    expect(sequences[1]).toBe(sequences[0]! + 1);
+  });
+
   test("飞书 HTTP 错误只保留错误码和文案", async () => {
     const client = {
       cardkit: {

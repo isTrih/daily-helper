@@ -48,7 +48,7 @@ export class LarkService {
   private readonly client: lark.Client;
   private wsClient: lark.WSClient | undefined;
   private readonly cardIdsByMessageId = new Map<string, string>();
-  private lastCardSequence = Date.now();
+  private lastCardSequence = Math.floor(Date.now() / 1_000) - 1;
 
   constructor(
     private readonly appId: string,
@@ -200,7 +200,7 @@ export class LarkService {
   }
 
   private nextCardSequence(): number {
-    this.lastCardSequence = Math.max(Date.now(), this.lastCardSequence + 1);
+    this.lastCardSequence = Math.max(Math.floor(Date.now() / 1_000), this.lastCardSequence + 1);
     return this.lastCardSequence;
   }
 }
