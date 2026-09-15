@@ -485,11 +485,12 @@ function compactTopGrowthElement(
 
   const medals = ["🥇", "🥈", "🥉", "④", "⑤"];
   const rows = items.slice(0, 5).map((item, index) => {
-    const title = middleTruncate(item.title || `视频 ${item.videoId}`, 10, 10);
+    const title = truncateTitle(item.title || `视频 ${item.videoId}`);
+    const label = auditLabel(item.label);
     const videoUrl = `https://www.douyin.com/video/${encodeURIComponent(item.videoId)}`;
     const publishedAt = formatPublishTime(item.publishTime, timezone);
     const cumulative = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
-    return `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})　**+${formatNumber(item.playGrowth)}**\n<font color='grey'>${safeMarkdownText(item.authorName || "未知作者")}丨发布 ${publishedAt}${cumulative}丨${growthLabel}</font>`;
+    return `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})${label}　**+${formatNumber(item.playGrowth)}**\n<font color='grey'>${safeMarkdownText(item.authorName || "未知作者")}丨发布 ${publishedAt}${cumulative}丨${growthLabel}</font>`;
   });
 
   return {
@@ -560,7 +561,8 @@ function topGrowthElements(
 
   const medals = ["🥇", "🥈", "🥉", "④", "⑤"];
   return items.slice(0, 5).map((item, index) => {
-    const title = middleTruncate(item.title || `视频 ${item.videoId}`, 10, 10);
+    const title = truncateTitle(item.title || `视频 ${item.videoId}`);
+    const label = auditLabel(item.label);
     const videoUrl = `https://www.douyin.com/video/${encodeURIComponent(item.videoId)}`;
     const publishedAt = formatPublishTime(item.publishTime, timezone);
     const latest = item.latestPlayCount === null ? "" : `丨累计播放 ${formatNumber(item.latestPlayCount)}`;
@@ -581,7 +583,7 @@ function topGrowthElements(
               tag: "div",
               text: {
                 tag: "lark_md",
-                content: `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})\n<font color='grey'>${safeMarkdownText(meta)}</font>`,
+                content: `${medals[index] ?? String(index + 1)} [${safeLinkText(title)}](${videoUrl})${label}\n<font color='grey'>${safeMarkdownText(meta)}</font>`,
               },
             },
           ],
@@ -631,10 +633,15 @@ function formatNumber(value: number): string {
   return String(Math.round(value * 10) / 10);
 }
 
-function middleTruncate(value: string, headLength: number, tailLength: number): string {
+function truncateTitle(value: string): string {
   const characters = Array.from(value);
-  if (characters.length <= headLength + tailLength) return value;
-  return `${characters.slice(0, headLength).join("")}…${characters.slice(-tailLength).join("")}`;
+  if (characters.length <= 12) return value;
+  return `${characters.slice(0, 12).join("")}…`;
+}
+
+function auditLabel(value: string | null): string {
+  const label = value?.trim();
+  return label ? `　<text_tag color='neutral'>${safeMarkdownText(label)}</text_tag>` : "";
 }
 
 // 卡片 Markdown 会把反斜杠原样展示在 text_tag 中，因此用全角字符消除语法含义。

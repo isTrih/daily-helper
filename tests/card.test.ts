@@ -51,7 +51,7 @@ function report(period: ProjectPeriod): PeriodReport {
         publishTime: "2026-09-13T08:00:00",
         authorName: `作者${index}`,
         title: index === 0 ? "1234567890ABCDEFGHIJabcdefghij" : `视频标题 ${index}`,
-        label: null,
+        label: index === 0 ? "审核通过" : null,
         playGrowth: 1000 - index,
         avgDailyPlayGrowth: 1000 - index,
         metricDays: 1,
@@ -90,8 +90,11 @@ describe("buildReportCard", () => {
     expect(json).not.toContain("万国26年8月第十五期");
     expect(json).toContain("https://www.douyin.com/video/video-0");
     expect(json).toContain("发布 09/13 16:00");
-    expect(json).toContain("1234567890…abcdefghij");
-    expect(json).not.toContain("ABCDEFGHIJ");
+    expect(json).toContain("1234567890AB…");
+    expect(json).not.toContain("1234567890ABC");
+    expect(json).not.toContain("abcdefghij");
+    expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
+    expect(json.match(/<text_tag color='neutral'>/g)).toHaveLength(2);
     expect(json).toContain('"corner_radius":"12px"');
     expect(json).toContain('"background_style":"cus-0"');
     expect(json).toContain('"light_mode":"rgba(240,246,255,0.88)"');
@@ -152,7 +155,7 @@ describe("buildReportCard", () => {
     const json = JSON.stringify(card);
     expect(json).toContain("本期增长 · 视频播放 Top 5");
     expect(json).toContain("本期新增");
-    expect(json).not.toContain("<text_tag");
+    expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
     expect(json).toContain('"flex_mode":"trisect"');
     expect(json).toContain("**800**</font>\\n<font color='grey'>点赞</font>");
     expect(json).toContain("**70**</font>\\n<font color='grey'>评论</font>");
