@@ -10,6 +10,8 @@ const previewButton = document.querySelector("#previewButton");
 const sendButton = document.querySelector("#sendButton");
 const connectionState = document.querySelector("#connectionState");
 const toast = document.querySelector("#toast");
+const enableForwardInput = form.elements.enableForward;
+const enableForwardInteractionInput = form.elements.enableForwardInteraction;
 
 await loadBootstrap();
 
@@ -22,7 +24,10 @@ document.querySelector("#selectLatestButton").addEventListener("click", () => {
   }
   updateSummary();
 });
-form.addEventListener("change", updateSummary);
+form.addEventListener("change", () => {
+  syncForwardPermissions();
+  updateSummary();
+});
 manualChatId.addEventListener("input", updateSummary);
 previewButton.addEventListener("click", () => runAction("preview"));
 form.addEventListener("submit", (event) => {
@@ -149,7 +154,14 @@ function collectRequest() {
   }
   const mode = form.elements.mode.value;
   const rankingMode = form.elements.rankingMode.value;
-  return { periodIds, mode, rankingMode, names };
+  const enableForward = enableForwardInput.checked;
+  const enableForwardInteraction = enableForward && enableForwardInteractionInput.checked;
+  return { periodIds, mode, rankingMode, enableForward, enableForwardInteraction, names };
+}
+
+function syncForwardPermissions() {
+  enableForwardInteractionInput.disabled = !enableForwardInput.checked;
+  if (!enableForwardInput.checked) enableForwardInteractionInput.checked = false;
 }
 
 function collectChatIds() {

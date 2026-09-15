@@ -185,16 +185,42 @@ describe("buildReportCard", () => {
     const card = buildReportCard({
       reports: [report(periods[1]!)],
       allPeriods: periods,
-      state: { scope: "period", periodIds: [10, 11], selectedPeriodId: 11, rankingMode: "today" },
+      state: {
+        scope: "period",
+        periodIds: [10, 11],
+        selectedPeriodId: 11,
+        rankingMode: "today",
+        enableForward: true,
+        enableForwardInteraction: true,
+      },
     });
     const json = JSON.stringify(card);
+    const config = card.config as Record<string, unknown>;
+    expect(config.enable_forward).toBe(true);
+    expect(config.enable_forward_interaction).toBe(true);
     expect(json).toContain('"action":"select_period"');
     expect(json).toContain('"period_ids":"10,11"');
+    expect(json).toContain('"enable_forward":"true"');
+    expect(json).toContain('"enable_forward_interaction":"true"');
     expect(json).toContain('"action":"show_latest"');
     expect(json).toContain('"action":"set_ranking"');
     expect(json).toContain("所有项目");
     expect(json).toContain("今日 TOP");
     expect(json).toContain("本期 TOP");
+  });
+
+  test("项目下拉只展示发送时锁定的项目期次", () => {
+    const card = buildReportCard({
+      reports: [report(oldPeriod)],
+      allPeriods: [...periods, oldPeriod],
+      state: { scope: "period", periodIds: [2, 11], selectedPeriodId: 2, rankingMode: "today" },
+    });
+    const json = JSON.stringify(card);
+    expect(json).toContain("万国26年8月第十五期");
+    expect(json).toContain('"value":"2"');
+    expect(json).toContain('"value":"11"');
+    expect(json).not.toContain('"value":"10"');
+    expect(json).not.toContain("万国26年9月第十六期");
   });
 
   test("超过四个项目时隐藏所有项目按钮", () => {
@@ -217,7 +243,14 @@ describe("buildReportCard", () => {
     const card = buildReportCard({
       reports: [report(periods[0]!)],
       allPeriods: periods,
-      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      state: {
+        scope: "period",
+        periodIds: [10],
+        selectedPeriodId: 10,
+        rankingMode: "today",
+        enableForward: true,
+        enableForwardInteraction: false,
+      },
       interactive: false,
     });
     const json = JSON.stringify(card);
@@ -232,7 +265,14 @@ describe("buildReportCard", () => {
   test("收起卡片只保留标题、更新时间和折叠按钮组", () => {
     const card = buildCollapsedReportCard({
       reports: [report(periods[0]!)],
-      state: { scope: "period", periodIds: [10], selectedPeriodId: 10, rankingMode: "today" },
+      state: {
+        scope: "period",
+        periodIds: [10],
+        selectedPeriodId: 10,
+        rankingMode: "today",
+        enableForward: true,
+        enableForwardInteraction: false,
+      },
       timezone: "Asia/Shanghai",
       projectColors: { 1: "red" },
       projectIcons: { 1: "img_v2_project_one" },
@@ -248,6 +288,8 @@ describe("buildReportCard", () => {
     expect(json).toContain('"tag":"overflow"');
     expect(json).toContain("展开卡片");
     expect(json).toContain("撤回卡片");
+    expect((card.config as Record<string, unknown>).enable_forward).toBe(true);
+    expect((card.config as Record<string, unknown>).enable_forward_interaction).toBe(false);
     expect(json).not.toContain("今日视频播放");
     expect(json).not.toContain("TOP · 视频播放");
   });

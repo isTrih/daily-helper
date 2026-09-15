@@ -7,6 +7,8 @@ export interface ReportRequest {
   periodIds: number[];
   mode: ReportMode;
   rankingMode: RankingMode;
+  enableForward?: boolean;
+  enableForwardInteraction?: boolean;
 }
 
 export interface SendReportRequest extends ReportRequest {
@@ -28,6 +30,8 @@ export class ReportOrchestrator {
       ? [...new Set(request.periodIds)]
       : (await this.reports.latestPeriods()).map((period) => period.activityPeriodId);
     if (requestedIds.length === 0) throw new Error("没有可发送的项目期次");
+    const enableForward = request.enableForward ?? false;
+    const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
 
     if (request.mode === "combined") {
       const initialPeriodId = requestedIds[0]!;
@@ -41,6 +45,8 @@ export class ReportOrchestrator {
             periodIds: requestedIds,
             selectedPeriodId: initialPeriodId,
             rankingMode: request.rankingMode,
+            enableForward,
+            enableForwardInteraction,
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
@@ -62,6 +68,8 @@ export class ReportOrchestrator {
           periodIds: [report.period.activityPeriodId],
           selectedPeriodId: report.period.activityPeriodId,
           rankingMode: request.rankingMode,
+          enableForward,
+          enableForwardInteraction,
         },
         timezone: this.timezone,
       }),

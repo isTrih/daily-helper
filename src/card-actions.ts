@@ -23,6 +23,8 @@ const actionValueSchema = z.object({
   scope: z.enum(["combined", "period"]).optional(),
   period_ids: z.string().optional(),
   selected_period_id: z.string().optional(),
+  enable_forward: z.enum(["true", "false"]).default("false"),
+  enable_forward_interaction: z.enum(["true", "false"]).default("false"),
   return_view: z.enum(["full", "collapsed"]).optional(),
 });
 
@@ -69,43 +71,61 @@ export function createCardActionHandler(
       }
       const allPeriods = await reportService.listPeriods();
       const originPeriodIds = parsePeriodIds(action.period_ids);
+      const enableForward = action.enable_forward === "true";
+      const enableForwardInteraction = enableForward && action.enable_forward_interaction === "true";
       let reportPeriodIds: number[];
       let state: CardViewState;
 
       if (actionType === "select_period") {
         const selectedPeriodId = Number(event.action?.option);
         if (!Number.isSafeInteger(selectedPeriodId)) throw new Error("期次选择值无效");
+        if (originPeriodIds.length === 0 || !originPeriodIds.includes(selectedPeriodId)) {
+          throw new Error("该期次不在卡片发送范围内");
+        }
         reportPeriodIds = [selectedPeriodId];
         state = {
           scope: "period",
-          periodIds: originPeriodIds.length > 0 ? originPeriodIds : [selectedPeriodId],
+          periodIds: originPeriodIds,
           selectedPeriodId,
           rankingMode,
+          enableForward,
+          enableForwardInteraction,
         };
       } else if (actionType === "show_latest") {
-        const latest = await reportService.latestPeriods();
-        reportPeriodIds = latest.map((period) => period.activityPeriodId);
+        if (originPeriodIds.length === 0) throw new Error("卡片未包含可选期次");
+        reportPeriodIds = originPeriodIds;
         state = {
           scope: "combined",
-          periodIds: reportPeriodIds,
+          periodIds: originPeriodIds,
           rankingMode,
+          enableForward,
+          enableForwardInteraction,
         };
       } else {
         const selectedPeriodId = Number(action.selected_period_id);
         if (action.scope === "period" && Number.isSafeInteger(selectedPeriodId)) {
+          if (originPeriodIds.length === 0 || !originPeriodIds.includes(selectedPeriodId)) {
+            throw new Error("该期次不在卡片发送范围内");
+          }
           reportPeriodIds = [selectedPeriodId];
           state = {
             scope: "period",
-            periodIds: originPeriodIds.length > 0 ? originPeriodIds : reportPeriodIds,
+            periodIds: originPeriodIds,
             selectedPeriodId,
             rankingMode,
+            enableForward,
+            enableForwardInteraction,
           };
         } else {
           reportPeriodIds = originPeriodIds;
-          if (reportPeriodIds.length === 0) {
-            reportPeriodIds = (await reportService.latestPeriods()).map((period) => period.activityPeriodId);
-          }
-          state = { scope: "combined", periodIds: reportPeriodIds, rankingMode };
+          if (reportPeriodIds.length === 0) throw new Error("卡片未包含可选期次");
+          state = {
+            scope: "combined",
+            periodIds: reportPeriodIds,
+            rankingMode,
+            enableForward,
+            enableForwardInteraction,
+          };
         }
       }
 
@@ -156,8 +176,8 @@ function overflowAction(value: string | undefined): "show_latest" | "set_ranking
 
 function parsePeriodIds(value: string | undefined): number[] {
   if (!value) return [];
-  return value
+  return [...new Set(value
     .split(",")
     .map(Number)
-    .filter(Number.isSafeInteger);
+    .filter((periodId) => Number.isSafeInteger(periodId) && periodId > 0))];
 }

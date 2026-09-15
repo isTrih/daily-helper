@@ -115,6 +115,16 @@ input[type="text"]:focus, select:focus { border-color: var(--green-2); box-shado
 .rank-switch span { display: block; border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; font-size: 12px; }
 .rank-switch input:checked + span { background: var(--lime); border-color: #bdde37; font-weight: 750; }
 
+.permission-options { display: grid; gap: 8px; margin-top: 24px; }
+.permission-row { min-height: 42px; display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); cursor: pointer; }
+.permission-row strong { flex: 1; font-size: 12px; }
+.permission-row input { position: absolute; opacity: 0; pointer-events: none; }
+.permission-row i { width: 36px; height: 20px; padding: 2px; border-radius: 999px; background: #cbd3ce; transition: .18s ease; }
+.permission-row i::after { content: ""; display: block; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 4px rgba(23,35,29,.18); transition: .18s ease; }
+.permission-row input:checked + i { background: var(--green-2); }
+.permission-row input:checked + i::after { transform: translateX(16px); }
+.permission-row:has(input:disabled) { color: var(--muted); cursor: not-allowed; opacity: .55; }
+
 .summary-card { margin-top: 20px; color: white; background: var(--green); border-radius: 18px; padding: 22px; overflow: hidden; position: relative; }
 .summary-card::after { content: ""; position: absolute; width: 150px; height: 150px; right: -60px; top: -70px; background: rgba(217,243,103,.18); border-radius: 50%; }
 .summary-date { color: var(--lime); font: italic 20px Georgia, serif; }

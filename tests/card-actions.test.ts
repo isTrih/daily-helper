@@ -72,6 +72,58 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(response.card?.data)).toContain("[ROK]生态");
   });
 
+  test("所有项目和项目切换都受发送期次白名单约束", async () => {
+    const augustPeriod: ProjectPeriod = {
+      ...periods[1]!,
+      activityPeriodId: 9,
+      period: "万国26年8月第十五期",
+      isLatest: false,
+    };
+    const availablePeriods = [...periods, augustPeriod];
+    let builtIds: number[] = [];
+    const reportService = {
+      listPeriods: async () => availablePeriods,
+      latestPeriods: async () => {
+        throw new Error("不应读取全局最新期次");
+      },
+      buildReports: async (ids: number[]) => {
+        builtIds = ids;
+        return ids.map((id) => makeReport(availablePeriods.find((period) => period.activityPeriodId === id)!));
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    const allProjects = await handler({
+      action: {
+        tag: "overflow",
+        option: "show_latest",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53,9",
+          selected_period_id: "9",
+        },
+      },
+    });
+    expect(builtIds).toEqual([53, 9]);
+    expect(JSON.stringify(allProjects.card?.data)).toContain("万国26年8月第十五期");
+    expect(JSON.stringify(allProjects.card?.data)).not.toContain("万国26年9月第十六期");
+
+    const outsideSelection = await handler({
+      action: {
+        tag: "select_static",
+        option: "10",
+        value: {
+          action: "select_period",
+          ranking_mode: "today",
+          period_ids: "53,9",
+        },
+      },
+    });
+    expect(outsideSelection.toast).toEqual({ type: "error", content: "操作失败：该期次不在卡片发送范围内" });
+    expect(outsideSelection.card).toBeUndefined();
+  });
+
   test("本期 TOP 选项覆盖当前排行模式", async () => {
     const handler = createCardActionHandler(fakeReportService as never, "Asia/Shanghai");
     const response = await handler({
@@ -106,9 +158,13 @@ describe("折叠按钮组回调", () => {
           action: "select_period",
           ranking_mode: "today",
           period_ids: "53,10",
+          enable_forward: "true",
+          enable_forward_interaction: "true",
         },
       },
     });
+    expect((response.card?.data.config as Record<string, unknown>).enable_forward).toBe(true);
+    expect((response.card?.data.config as Record<string, unknown>).enable_forward_interaction).toBe(true);
     expect((response.card?.data.header as Record<string, unknown>).template).toBe("red");
     expect((response.card?.data.header as Record<string, unknown>).icon).toEqual({
       tag: "custom_icon",

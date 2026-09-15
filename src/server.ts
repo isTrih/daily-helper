@@ -8,6 +8,8 @@ const reportRequestSchema = z.object({
   periodIds: z.array(z.number().int().positive()).default([]),
   mode: z.enum(["combined", "single"]).default("combined"),
   rankingMode: z.enum(["today", "period"]).default("today"),
+  enableForward: z.boolean().default(false),
+  enableForwardInteraction: z.boolean().default(false),
 });
 
 const sendRequestSchema = reportRequestSchema.extend({

@@ -39,6 +39,8 @@ describe("ReportOrchestrator", () => {
       periodIds: periods.map((item) => item.activityPeriodId),
       mode: "single",
       rankingMode: "today",
+      enableForward: true,
+      enableForwardInteraction: true,
     });
 
     expect(cards).toHaveLength(2);
@@ -50,7 +52,26 @@ describe("ReportOrchestrator", () => {
     });
     for (const card of cards) {
       expect((card.config as Record<string, unknown>).update_multi).toBeUndefined();
+      expect((card.config as Record<string, unknown>).enable_forward).toBe(true);
+      expect((card.config as Record<string, unknown>).enable_forward_interaction).toBe(true);
       expect(JSON.stringify(card)).not.toContain('"callback"');
     }
+  });
+
+  test("关闭转发时忽略转发后交互设置", async () => {
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async (ids: number[]) => ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!)),
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const [card] = await orchestrator.createCards({
+      periodIds: [periods[0]!.activityPeriodId],
+      mode: "combined",
+      rankingMode: "today",
+      enableForward: false,
+      enableForwardInteraction: true,
+    });
+    expect((card!.config as Record<string, unknown>).enable_forward).toBe(false);
+    expect((card!.config as Record<string, unknown>).enable_forward_interaction).toBe(false);
   });
 });

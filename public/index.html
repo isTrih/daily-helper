@@ -79,6 +79,20 @@
             <label><input type="radio" name="rankingMode" value="today" checked /><span>今日播放增长</span></label>
             <label><input type="radio" name="rankingMode" value="period" /><span>本期播放增长</span></label>
           </fieldset>
+
+          <fieldset class="permission-options">
+            <legend>卡片权限</legend>
+            <label class="permission-row">
+              <strong>允许转发</strong>
+              <input type="checkbox" name="enableForward" />
+              <i aria-hidden="true"></i>
+            </label>
+            <label class="permission-row">
+              <strong>转发后允许交互</strong>
+              <input type="checkbox" name="enableForwardInteraction" disabled />
+              <i aria-hidden="true"></i>
+            </label>
+          </fieldset>
         </section>
 
         <aside class="panel dispatch" aria-labelledby="dispatchTitle">

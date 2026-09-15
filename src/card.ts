@@ -159,8 +159,7 @@ export function buildReportCard(args: {
     schema: "2.0",
     config: {
       ...(interactive ? { update_multi: true } : {}),
-      enable_forward: false,
-      enable_forward_interaction: false,
+      ...forwardingConfig(state),
       summary: { content: `${title}｜${subtitle}` },
       style: cardColorStyle,
     },
@@ -196,7 +195,7 @@ export function buildCollapsedReportCard(args: {
   const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {});
   return {
     schema: "2.0",
-    config: interactiveCardConfig(identity.title, identity.subtitle),
+    config: interactiveCardConfig(identity.title, identity.subtitle, state),
     header: cardHeader(identity),
     body: {
       direction: "vertical",
@@ -251,8 +250,7 @@ export function buildRecallConfirmationCard(args: {
     schema: "2.0",
     config: {
       update_multi: true,
-      enable_forward: false,
-      enable_forward_interaction: false,
+      ...forwardingConfig(state),
       summary: { content: `确认撤回 ${title}` },
     },
     header: {
@@ -319,13 +317,20 @@ function cardIdentity(
   };
 }
 
-function interactiveCardConfig(title: string, subtitle: string): Record<string, unknown> {
+function interactiveCardConfig(title: string, subtitle: string, state: CardViewState): Record<string, unknown> {
   return {
     update_multi: true,
-    enable_forward: false,
-    enable_forward_interaction: false,
+    ...forwardingConfig(state),
     summary: { content: `${title}｜${subtitle}` },
     style: cardColorStyle,
+  };
+}
+
+function forwardingConfig(state: CardViewState): Record<string, boolean> {
+  const enableForward = state.enableForward ?? false;
+  return {
+    enable_forward: enableForward,
+    enable_forward_interaction: enableForward && (state.enableForwardInteraction ?? false),
   };
 }
 
@@ -375,19 +380,21 @@ function cardStateValue(state: CardViewState): Record<string, string> {
     scope: state.scope,
     period_ids: state.periodIds.join(","),
     selected_period_id: state.selectedPeriodId ? String(state.selectedPeriodId) : "",
+    enable_forward: String(state.enableForward ?? false),
+    enable_forward_interaction: String((state.enableForward ?? false) && (state.enableForwardInteraction ?? false)),
   };
 }
 
 function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElement[] {
-  const availablePeriods = latestPeriodPerProject(allPeriods);
+  const periodsById = new Map(allPeriods.map((period) => [period.activityPeriodId, period]));
+  const availablePeriods = state.periodIds.flatMap((periodId) => {
+    const period = periodsById.get(periodId);
+    return period ? [period] : [];
+  });
   const selected = state.selectedPeriodId
     ? availablePeriods.find((period) => period.activityPeriodId === state.selectedPeriodId)
     : undefined;
-  const actionState = {
-    scope: state.scope,
-    period_ids: state.periodIds.join(","),
-    selected_period_id: state.selectedPeriodId ? String(state.selectedPeriodId) : "",
-  };
+  const actionState = cardStateValue(state);
 
   return [
     {
@@ -420,8 +427,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
                   type: "callback",
                   value: {
                     action: "select_period",
-                    ranking_mode: state.rankingMode,
-                    period_ids: state.periodIds.join(","),
+                    ...actionState,
                   },
                 },
               ],
@@ -438,7 +444,7 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
                 elements: [
                   button("所有项目", "view_latest", {
                     action: "show_latest",
-                    ranking_mode: state.rankingMode,
+                    ...actionState,
                   }),
                 ],
               },
@@ -452,8 +458,8 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           elements: [
             button("今日 TOP", "rank_today", {
               action: "set_ranking",
-              ranking_mode: "today",
               ...actionState,
+              ranking_mode: "today",
             }, state.rankingMode === "today"),
           ],
         },
@@ -465,8 +471,8 @@ function controls(allPeriods: ProjectPeriod[], state: CardViewState): CardElemen
           elements: [
             button("本期 TOP", "rank_period", {
               action: "set_ranking",
-              ranking_mode: "period",
               ...actionState,
+              ranking_mode: "period",
             }, state.rankingMode === "period"),
           ],
         },
@@ -797,17 +803,6 @@ function topGrowthElements(
       ],
     };
   });
-}
-
-function latestPeriodPerProject(periods: ProjectPeriod[]): ProjectPeriod[] {
-  const latestByProject = new Map<number, ProjectPeriod>();
-  for (const period of periods) {
-    const current = latestByProject.get(period.projectId);
-    if (!current || period.activityPeriodId > current.activityPeriodId) {
-      latestByProject.set(period.projectId, period);
-    }
-  }
-  return periods.filter((period) => latestByProject.get(period.projectId)?.activityPeriodId === period.activityPeriodId);
 }
 
 function colorFor(projectId: number, projectColors: ProjectColors): CardColor {

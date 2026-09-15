@@ -85,6 +85,8 @@ export interface CardViewState {
   periodIds: number[];
   selectedPeriodId?: number;
   rankingMode: RankingMode;
+  enableForward?: boolean;
+  enableForwardInteraction?: boolean;
 }
 
 export type CardJson = Record<string, unknown>;
