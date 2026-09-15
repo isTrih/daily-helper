@@ -159,9 +159,8 @@ export function buildReportCard(args: {
     schema: "2.0",
     config: {
       update_multi: interactive,
-      enable_forward: true,
+      enable_forward: false,
       enable_forward_interaction: false,
-      width_mode: "fill",
       summary: { content: `${title}｜${subtitle}` },
       style: cardColorStyle,
     },

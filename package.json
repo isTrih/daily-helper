@@ -1,6 +1,6 @@
 {
   "name": "lark-project-daily-report",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "scripts": {

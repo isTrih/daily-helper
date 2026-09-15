@@ -83,7 +83,11 @@ describe("buildReportCard", () => {
     });
     const json = JSON.stringify(card);
     expect(card.schema).toBe("2.0");
-    expect((card.config as Record<string, unknown>).update_multi).toBe(true);
+    const config = card.config as Record<string, unknown>;
+    expect(config.update_multi).toBe(true);
+    expect(config.enable_forward).toBe(false);
+    expect(config.enable_forward_interaction).toBe(false);
+    expect(config.width_mode).toBeUndefined();
     expect(json).toContain("项目每日速览");
     expect(json).toContain("视频标题 4");
     expect(json).not.toContain("视频标题 5");
