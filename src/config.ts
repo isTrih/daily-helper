@@ -27,7 +27,7 @@ const envSchema = z.object({
   LARK_DEFAULT_CHAT_ID: z.string().trim().optional(),
   LARK_LONG_CONNECTION_ENABLED: booleanFromEnv,
   XINGTU_API_BASE: z.string().url().default("https://autoxingtu.api.ali.trih.top"),
-  XINGTU_API_TOKEN: z.string().trim().optional(),
+  INTERNAL_API_TOKEN: z.string().trim().min(1, "INTERNAL_API_TOKEN 不能为空"),
   PROJECT_ORDER: z.string().trim().default(""),
   COLOR: z.string().trim().default(""),
   ICON: z.string().trim().default(""),
@@ -73,7 +73,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     port: parsed.PORT,
     xingtu: {
       baseUrl: parsed.XINGTU_API_BASE.replace(/\/$/, ""),
-      token: parsed.XINGTU_API_TOKEN || undefined,
+      token: parsed.INTERNAL_API_TOKEN,
     },
     projectOrder,
     projectColors,

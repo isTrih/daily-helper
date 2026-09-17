@@ -11,6 +11,7 @@ export interface ReportRequest {
   enableForwardInteraction?: boolean;
   showTrend?: boolean;
   showAllSelected?: boolean;
+  isPrivateChat?: boolean;
 }
 
 export interface SendReportRequest extends ReportRequest {
@@ -44,7 +45,7 @@ export class ReportOrchestrator {
       if (count > 2) throw new Error(`${period.projectDisplayName} 最多可同时选择两个期次`);
       periodCountByProject.set(period.projectId, count);
     }
-    const enableForward = request.enableForward ?? false;
+    const enableForward = request.isPrivateChat ? false : request.enableForward ?? false;
     const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
     const showTrend = request.showTrend ?? false;
     const createdAt = new Date();

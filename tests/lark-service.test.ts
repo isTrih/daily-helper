@@ -146,7 +146,7 @@ describe("LarkService CardKit 卡片", () => {
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toBe("向群聊 oc_error 发送卡片失败：230001 invalid card content");
+    expect(message).toBe("向会话 oc_error 发送卡片失败：230001 invalid card content");
     expect(message).not.toContain("must_not_leak");
   });
 });

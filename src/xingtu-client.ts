@@ -63,7 +63,7 @@ type SearchValue = string | number | boolean | null | undefined;
 export class XingtuClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly token?: string,
+    private readonly token: string,
   ) {}
 
   async listProjectPeriods(): Promise<ProjectPeriod[]> {
@@ -165,7 +165,7 @@ export class XingtuClient {
     const response = await fetch(url, {
       headers: {
         accept: "application/json",
-        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+        authorization: `Bearer ${this.token}`,
       },
       signal: AbortSignal.timeout(10_000),
     });

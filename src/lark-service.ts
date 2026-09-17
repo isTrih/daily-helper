@@ -108,7 +108,7 @@ export class LarkService {
     if (!cardId) throw new Error("飞书创建卡片实体成功但未返回 card_id");
 
     const response = await larkRequest(
-      `向群聊 ${chatId} 发送卡片`,
+      `向会话 ${chatId} 发送卡片`,
       () => this.client.im.v1.message.create({
         params: { receive_id_type: "chat_id" },
         data: {
@@ -118,7 +118,7 @@ export class LarkService {
         },
       }),
     );
-    assertLarkSuccess(response.code, response.msg, `向群聊 ${chatId} 发送卡片`);
+    assertLarkSuccess(response.code, response.msg, `向会话 ${chatId} 发送卡片`);
     const messageId = response.data?.message_id;
     if (!messageId) throw new Error("飞书发送成功但未返回 message_id");
     this.cardIdsByMessageId.set(messageId, cardId);

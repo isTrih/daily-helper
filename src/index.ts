@@ -27,7 +27,7 @@ const server = startServer({
   ...(larkService ? { larkService } : {}),
   orchestrator,
 });
-const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, projectCodes) => {
+const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, projectCodes, { isPrivateChat }) => {
   const latestPeriods = projectCodes ? await reportService.latestPeriods() : [];
   const matchedPeriods = projectCodes
     ? projectCodes.map((projectCode) => latestPeriods.find((period) =>
@@ -47,8 +47,9 @@ const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, proje
     mode: "combined",
     rankingMode: "today",
     showAllSelected: projectCodes !== undefined,
+    isPrivateChat,
   });
-  console.info(`[lark] 发送数据指令执行完成，群聊 ${chatId}${projectCodes ? `，项目 ${projectCodes.join("/")}` : ""}，共 ${result.messageCount} 条消息`);
+  console.info(`[lark] 发送数据指令执行完成，${isPrivateChat ? "私聊" : "群聊"} ${chatId}${projectCodes ? `，项目 ${projectCodes.join("/")}` : ""}，共 ${result.messageCount} 条消息`);
 });
 
 let scheduledJob: Cron | undefined;

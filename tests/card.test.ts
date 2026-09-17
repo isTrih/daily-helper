@@ -272,7 +272,7 @@ describe("buildReportCard", () => {
     const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
     const chart = elements.find((element) => element.tag === "chart")!;
     const spec = chart.chart_spec as { series: Array<{ id: string; type: string }>; axes: Array<Record<string, unknown>> };
-    expect(chart.width).toBe("fill");
+    expect(chart.width).toBeUndefined();
     expect(chart.height).toBe("340px");
     expect(chart.margin).toBe("8px -12px 6px -12px");
     expect((chart.chart_spec as Record<string, unknown>).autoFit).toBe(true);

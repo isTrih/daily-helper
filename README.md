@@ -15,6 +15,8 @@
 - 环境变量指定默认自动发送群，Cron 定时发送所有项目的最新期次。
 - 单独日报使用接口返回的 `period` 作为标题，不显示项目、期次和排行切换控件，只在页脚保留收起、趋势图和撤回操作；项目 1/2/3 分别使用金色（飞书 `yellow`）、紫色和绿色主题。
 - 群聊中 `@机器人` 后发送“发送数据”或“巴拉拉能量”，以及无需 @ 直接发送“巴拉拉能量”，都会发送所有项目最新一期；`巴拉拉能量 ROK&SAMO` 等指令可按任意符号分隔 `ROK`、`SAMO`、`D1`，并生成所选项目的多合一日报，项目码不区分大小写。
+- 私聊中无需 @ 即可使用“发送数据”、“数据发送”或“巴拉拉能量”及其项目定向形式；私聊生成的卡片始终禁止转发及转发后交互。
+- 所有星图读取请求都使用 `INTERNAL_API_TOKEN` 作为 JWT Bearer Token。
 
 > 飞书 Card JSON 2.0 的 raw JSON 不支持“循环容器”（该组件只在 CardKit 搭建模板中可用）。项目没有提供 CardKit 模板 ID，因此本项目在服务端用数组循环展开标准 JSON 2.0 组件，实际效果和数据条数一致，也避免部署前还要手工发布模板。
 
@@ -45,6 +47,7 @@ bun run dev
 LARK_APP_ID=cli_xxxxxxxxxxxxxxxx
 LARK_APP_SECRET=xxxxxxxxxxxxxxxx
 LARK_DEFAULT_CHAT_ID=oc_xxxxxxxxxxxxxxxx
+INTERNAL_API_TOKEN=xxxxxxxxxxxxxxxx
 PROJECT_ORDER=3,1,2
 COLOR=1-yellow,2-purple,3-blue,4-orange
 ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
@@ -55,7 +58,7 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 | 变量                           | 默认值                                | 说明                                                  |
 | ------------------------------ | ------------------------------------- | ----------------------------------------------------- |
 | `XINGTU_API_BASE`              | `https://autoxingtu.api.ali.trih.top` | 星图 API 根地址                                       |
-| `XINGTU_API_TOKEN`             | 空                                    | 可选 Bearer Token                                     |
+| `INTERNAL_API_TOKEN`           | 无                                    | 必填；星图 API 的 JWT Bearer Token                    |
 | `PROJECT_ORDER`                | 空                                    | project_id 展示顺序，如 `3,1,2`；未列出的项目自动追加 |
 | `COLOR`                        | 空                                    | 项目主题色，如 `1-yellow,2-purple,3-blue`；支持 `blue`、`wathet`、`turquoise`、`green`、`yellow`、`orange`、`red`、`carmine`、`violet`、`purple`、`indigo`、`grey` |
 | `ICON`                         | 空                                    | 项目标题图标，如 `1-img_v2_xxx,2-img_v2_yyy`；值为飞书图片的 `img_key`，未配置时使用默认图标 |
@@ -70,7 +73,7 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 ## 飞书应用配置
 
 1. 在飞书开发者后台启用机器人能力。
-2. 为应用开通发送消息和读取群聊所需权限（至少包含 `im:message:send_as_bot`；无 @ 指令还需要读取群内全部消息的 `im:message.group_msg` 权限），发布应用版本，并把机器人加入目标群聊。
+2. 为应用开通发送消息和读取会话所需权限（至少包含 `im:message:send_as_bot`；无 @ 群聊指令需要 `im:message.group_msg`，私聊指令需要 `im:message.p2p_msg`），发布应用版本，并把机器人加入目标群聊。
 3. 在 **事件与回调 → 回调配置** 中选择 **使用长连接接收回调**。
 4. 添加新版 **卡片回传交互** 回调 `card.action.trigger`，以及 **接收消息** 事件 `im.message.receive_v1`。不要同时保留旧版卡片回调，避免一次点击收到两次请求。
 5. 配置 `.env` 后重启服务。日志出现“卡片回调长连接已就绪”即接入成功。
@@ -90,6 +93,7 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 - 增长排行：`GET /api/v1/queries/videos/top-growth?limit=5`。
 
 所有接口查询并发执行，日报结果短暂缓存 45 秒，以便卡片交互尽量稳定地在飞书的 3 秒响应窗口内完成。
+每个读取请求都会携带 `Authorization: Bearer <INTERNAL_API_TOKEN>`；未配置 token 时服务会在启动期间立即报错。
 
 ## 管理 API
 

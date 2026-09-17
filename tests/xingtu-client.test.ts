@@ -3,11 +3,13 @@ import { dateInTimezone } from "../src/report-service.ts";
 import { XingtuClient } from "../src/xingtu-client.ts";
 
 const seenUrls: string[] = [];
+const seenAuthorization: string[] = [];
 const mockServer = Bun.serve({
   port: 0,
   fetch(request) {
     const url = new URL(request.url);
     seenUrls.push(url.pathname + url.search);
+    seenAuthorization.push(request.headers.get("authorization") ?? "");
     if (url.pathname === "/api/v1/queries/projects") {
       return Response.json([
         { activity_period_id: 2, project_id: 1, project_key: "P1", project_display_name: "项目1", period: "旧期" },
@@ -43,7 +45,7 @@ const mockServer = Bun.serve({
   },
 });
 
-const client = new XingtuClient(`http://127.0.0.1:${mockServer.port}`);
+const client = new XingtuClient(`http://127.0.0.1:${mockServer.port}`, "test-token");
 
 afterAll(() => mockServer.stop(true));
 
@@ -53,6 +55,7 @@ describe("XingtuClient", () => {
     expect(periods.find((period) => period.activityPeriodId === 10)?.isLatest).toBe(true);
     expect(periods.find((period) => period.activityPeriodId === 2)?.isLatest).toBe(false);
     expect(periods.find((period) => period.activityPeriodId === 3)?.isLatest).toBe(true);
+    expect(seenAuthorization.slice(-2)).toEqual(["Bearer test-token", "Bearer test-token"]);
   });
 
   test("Top Growth 请求使用内容配置、日期和 limit=5", async () => {
@@ -61,6 +64,7 @@ describe("XingtuClient", () => {
     expect(seenUrls).toContain(
       "/api/v1/queries/videos/top-growth?content_config_id=15&date=2026-09-14&limit=5",
     );
+    expect(seenAuthorization.at(-1)).toBe("Bearer test-token");
   });
 });
 

@@ -99,6 +99,24 @@ describe("ReportOrchestrator", () => {
     expect((card!.config as Record<string, unknown>).enable_forward_interaction).toBe(false);
   });
 
+  test("私聊卡片强制禁止转发", async () => {
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async (ids: number[]) => ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!)),
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const [card] = await orchestrator.createCards({
+      periodIds: [periods[0]!.activityPeriodId],
+      mode: "combined",
+      rankingMode: "today",
+      enableForward: true,
+      enableForwardInteraction: true,
+      isPrivateChat: true,
+    });
+    expect((card!.config as Record<string, unknown>).enable_forward).toBe(false);
+    expect((card!.config as Record<string, unknown>).enable_forward_interaction).toBe(false);
+  });
+
   test("多合一日报可将同一项目的两个期次直接放在一张卡中", async () => {
     const earlierPeriod: ProjectPeriod = {
       ...periods[0]!,

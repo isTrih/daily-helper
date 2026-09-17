@@ -1012,7 +1012,6 @@ function videoTrendChart(report: PeriodReport, theme: CardColor): CardElement {
   return {
     tag: "chart",
     element_id: "video_daily_trend",
-    width: "fill",
     height: "340px",
     margin: "8px -12px 6px -12px",
     preview: true,
