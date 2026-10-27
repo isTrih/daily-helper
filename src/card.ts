@@ -122,13 +122,25 @@ export function buildReportCard(args: {
     ));
   }
 
+  const dashboardReport = focusedReport ?? reports[0]!;
   elements.push({
     tag: "column_set",
     flex_mode: "none",
-    horizontal_align: "right",
     horizontal_spacing: "6px",
     margin: "10px 0 0 0",
     columns: [
+      {
+        tag: "column",
+        width: "auto",
+        vertical_align: "center",
+        elements: [dashboardButton(dashboardReport)],
+      },
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [],
+      },
       {
         tag: "column",
         width: "auto",
@@ -715,6 +727,22 @@ function button(
   };
 }
 
+function dashboardButton(report: PeriodReport): CardElement {
+  const url = new URL("https://3h.workspace.lilith.trih.top/");
+  url.searchParams.set("period", String(report.period.projectId));
+  url.searchParams.set("act", String(report.period.activityPeriodId));
+
+  return {
+    tag: "button",
+    element_id: "project_dashboard",
+    type: "default",
+    size: "small",
+    width: "default",
+    text: { tag: "plain_text", content: "项目数据看板" },
+    behaviors: [{ type: "open_url", default_url: url.toString() }],
+  };
+}
+
 function reportElements(
   report: PeriodReport,
   rankingMode: CardViewState["rankingMode"],
@@ -837,7 +865,7 @@ function reportElements(
           text_size: "notation",
         },
       },
-      compactTopGrowthElement(video.topGrowth, timezone, topTitle, growthLabel),
+      topGrowthPanel(video.topGrowth, timezone, topTitle, growthLabel, true),
     ];
   }
 
@@ -861,15 +889,7 @@ function reportElements(
       columns: cumulativeMetrics,
     },
     ...(showTrend ? [videoTrendChart(report, color)] : []),
-    {
-      tag: "div",
-      margin: "4px 0 2px 0",
-      text: {
-        tag: "lark_md",
-        content: `**${topTitle} · 视频播放**`,
-      },
-    },
-    ...topGrowthElements(video.topGrowth, timezone, growthLabel),
+    topGrowthPanel(video.topGrowth, timezone, topTitle, growthLabel, false),
   ];
 }
 
@@ -909,10 +929,42 @@ function highlightMetric(
   };
 }
 
-function compactTopGrowthElement(
+function topGrowthPanel(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
   title: string,
+  growthLabel: string,
+  compact: boolean,
+): CardElement {
+  return {
+    tag: "collapsible_panel",
+    expanded: false,
+    margin: "4px 0 0 0",
+    header: {
+      title: { tag: "markdown", content: `**${title} · 视频播放**` },
+      width: "fill",
+      vertical_align: "center",
+      padding: "8px 10px",
+      icon: {
+        tag: "standard_icon",
+        token: "down-small-ccm_outlined",
+        size: "16px 16px",
+      },
+      icon_position: "right",
+      icon_expanded_angle: -180,
+    },
+    border: { color: "grey", corner_radius: "8px" },
+    vertical_spacing: "8px",
+    padding: "4px 10px 10px 10px",
+    elements: compact
+      ? [compactTopGrowthElement(items, timezone, growthLabel)]
+      : topGrowthElements(items, timezone, growthLabel),
+  };
+}
+
+function compactTopGrowthElement(
+  items: PeriodReport["video"]["topGrowth"],
+  timezone: string,
   growthLabel: string,
 ): CardElement {
   if (items.length === 0) {
@@ -920,7 +972,7 @@ function compactTopGrowthElement(
       tag: "div",
       text: {
         tag: "lark_md",
-        content: `**${title} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
+        content: "<font color='grey'>暂无播放增长数据</font>",
       },
     };
   }
@@ -939,7 +991,7 @@ function compactTopGrowthElement(
     tag: "div",
     text: {
       tag: "lark_md",
-      content: `**${title} · 视频播放**\n${rows.join("\n")}`,
+      content: rows.join("\n"),
     },
   };
 }

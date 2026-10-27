@@ -122,6 +122,18 @@ describe("buildReportCard", () => {
     expect(json).toContain("1234567890AB…");
     expect(json).not.toContain("1234567890ABC");
     expect(json).not.toContain("abcdefghij");
+    const collapsiblePanels = (card.body as { elements: Array<Record<string, unknown>> }).elements.filter(
+      (element) => element.tag === "collapsible_panel",
+    );
+    expect(collapsiblePanels).toHaveLength(2);
+    for (const panel of collapsiblePanels) {
+      expect(panel.expanded).toBe(false);
+      expect(panel.header).toEqual(expect.objectContaining({
+        title: { tag: "markdown", content: "**今日 TOP · 视频播放**" },
+        icon_position: "right",
+        icon_expanded_angle: -180,
+      }));
+    }
     expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
     expect(json.match(/<text_tag color='neutral'>/g)).toHaveLength(2);
     expect(json).toContain('"corner_radius":"12px"');
@@ -164,6 +176,11 @@ describe("buildReportCard", () => {
     expect(json).toContain('"user_id":"ou_c909863fbf86e93840200f4d30a2229c"');
     expect(json).toContain('"show_name":true');
     expect(json).toContain('"style":"capsule"');
+    expect(json).toContain('"element_id":"project_dashboard"');
+    expect(json).toContain('"content":"项目数据看板"');
+    expect(json).toContain('"type":"open_url"');
+    expect(json).toContain("https://3h.workspace.lilith.trih.top/?period=1&act=10");
+    expect(json.indexOf("项目数据看板")).toBeLessThan(json.indexOf("有疑问找"));
     expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
     expect(json).toContain('"tag":"overflow"');
     expect(json).toContain('"action":"card_tools"');
@@ -173,6 +190,23 @@ describe("buildReportCard", () => {
     expect(json.indexOf('"element_id":"card_tools"')).toBeLessThan(json.indexOf("有疑问找"));
     expect((card.body as { elements: unknown[] }).elements.length).toBeLessThan(30);
     expect(Buffer.byteLength(json)).toBeLessThan(30 * 1024);
+  });
+
+  test("项目数据看板按钮使用当前项目和活动期次参数", () => {
+    const dashboardPeriod: ProjectPeriod = {
+      ...periods[0]!,
+      projectId: 3,
+      activityPeriodId: 61,
+    };
+    const card = buildReportCard({
+      reports: [report(dashboardPeriod)],
+      allPeriods: [dashboardPeriod],
+      state: { scope: "period", periodIds: [61], selectedPeriodId: 61, rankingMode: "today" },
+    });
+    const json = JSON.stringify(card);
+
+    expect(json).toContain("https://3h.workspace.lilith.trih.top/?period=3&act=61");
+    expect(json).not.toContain("61%E3%80%82");
   });
 
   test("单项目标题使用 period，项目 1 使用金色主题", () => {
@@ -191,6 +225,10 @@ describe("buildReportCard", () => {
     expect(header.text_tag_list).toBeUndefined();
     const json = JSON.stringify(card);
     expect(json).toContain("本期 TOP · 视频播放");
+    const panel = (card.body as { elements: Array<Record<string, unknown>> }).elements.find(
+      (element) => element.tag === "collapsible_panel",
+    );
+    expect(panel?.expanded).toBe(false);
     expect(json).toContain("本期累计数据");
     expect(json.indexOf("今日视频播放")).toBeLessThan(json.indexOf("本期累计数据"));
     expect(json).toContain('"height":"100px"');
