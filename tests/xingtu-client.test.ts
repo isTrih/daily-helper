@@ -41,6 +41,32 @@ const mockServer = Bun.serve({
         },
       ]);
     }
+    if (url.pathname === "/api/v1/queries/videos/with-metrics") {
+      return Response.json([
+        {
+          content_config_id: 15,
+          video_id: "topic-v1",
+          publish_time: "2026-09-13T08:00:00",
+          author_uid: "author-1",
+          author_name: "作者",
+          title: "#塔塔万圣捣蛋时刻",
+          label: "攻略",
+          latest_play_count: 456,
+          metrics: [
+            {
+              stat_date: "2026-09-14",
+              is_daily_final: true,
+              play_count: 456,
+              play_increment: 123,
+              like_count: 20,
+              like_increment: 5,
+              comment_count: 3,
+              comment_increment: 1,
+            },
+          ],
+        },
+      ]);
+    }
     return Response.json({ error: "not found" }, { status: 404 });
   },
 });
@@ -63,6 +89,19 @@ describe("XingtuClient", () => {
     expect(result[0]?.playGrowth).toBe(123);
     expect(seenUrls).toContain(
       "/api/v1/queries/videos/top-growth?content_config_id=15&date=2026-09-14&limit=5",
+    );
+    expect(seenAuthorization.at(-1)).toBe("Bearer test-token");
+  });
+
+  test("视频指标明细使用 JWT 并映射逐日增量", async () => {
+    const result = await client.getVideosWithMetrics(15, { from: "2026-09-01", to: "2026-09-14" });
+    expect(result[0]?.metrics[0]).toMatchObject({
+      statDate: "2026-09-14",
+      playCount: 456,
+      playIncrement: 123,
+    });
+    expect(seenUrls).toContain(
+      "/api/v1/queries/videos/with-metrics?content_config_id=15&date_from=2026-09-01&date_to=2026-09-14&limit=500&offset=0&metrics_mode=history",
     );
     expect(seenAuthorization.at(-1)).toBe("Bearer test-token");
   });

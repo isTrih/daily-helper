@@ -35,5 +35,6 @@ test("ICON 解析项目标题图标并忽略无效配置", () => {
 
 test("星图 API 使用必填的 INTERNAL_API_TOKEN", () => {
   expect(readConfig(auth).xingtu.token).toBe("test-token");
+  expect(readConfig(auth).schedule.storePath).toBe("data/schedules.json");
   expect(() => readConfig({})).toThrow("INTERNAL_API_TOKEN");
 });

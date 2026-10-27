@@ -36,6 +36,7 @@ const envSchema = z.object({
   AUTO_DAILY_REPORT_ENABLED: booleanFromEnv,
   DAILY_REPORT_CRON: z.string().trim().default("0 9 * * *"),
   REPORT_TIMEZONE: z.string().trim().default("Asia/Shanghai"),
+  SCHEDULES_FILE: z.string().trim().min(1).default("data/schedules.json"),
 });
 
 export type AppConfig = ReturnType<typeof readConfig>;
@@ -89,6 +90,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       enabled: parsed.AUTO_DAILY_REPORT_ENABLED,
       cron: parsed.DAILY_REPORT_CRON,
       timezone: parsed.REPORT_TIMEZONE,
+      storePath: parsed.SCHEDULES_FILE,
     },
   };
 }

@@ -4,6 +4,7 @@ import type {
   LiveSummary,
   ProjectPeriod,
   VideoGrowth,
+  VideoWithMetrics,
   VideoSummary,
 } from "./types.ts";
 
@@ -56,6 +57,29 @@ const videoGrowthSchema = z.object({
   metric_days: z.number().int(),
   latest_play_count: z.number().int().nullish(),
   latest_stat_date: z.string().nullish(),
+});
+
+const videoMetricPointSchema = z.object({
+  stat_date: z.string(),
+  is_daily_final: z.boolean(),
+  play_count: z.number().int().nullish(),
+  play_increment: z.number().int().nullish(),
+  like_count: z.number().int().nullish(),
+  like_increment: z.number().int().nullish(),
+  comment_count: z.number().int().nullish(),
+  comment_increment: z.number().int().nullish(),
+});
+
+const videoWithMetricsSchema = z.object({
+  content_config_id: z.number().int(),
+  video_id: z.string(),
+  publish_time: z.string(),
+  author_uid: z.string().nullish(),
+  author_name: z.string().nullish(),
+  title: z.string().nullish(),
+  label: z.string().nullish(),
+  latest_play_count: z.number().int().nullish(),
+  metrics: z.array(videoMetricPointSchema),
 });
 
 type SearchValue = string | number | boolean | null | undefined;
@@ -154,6 +178,28 @@ export class XingtuClient {
     }));
   }
 
+  async getVideosWithMetrics(
+    contentConfigId: number,
+    range: { date?: string; from?: string; to?: string },
+  ): Promise<VideoWithMetrics[]> {
+    const pageSize = 500;
+    const values: VideoWithMetrics[] = [];
+    for (let offset = 0; offset < 5_000; offset += pageSize) {
+      const items = await this.get("/api/v1/queries/videos/with-metrics", z.array(videoWithMetricsSchema), {
+        content_config_id: contentConfigId,
+        date: range.date,
+        date_from: range.from,
+        date_to: range.to,
+        limit: pageSize,
+        offset,
+        metrics_mode: "history",
+      });
+      values.push(...items.map(mapVideoWithMetrics));
+      if (items.length < pageSize) break;
+    }
+    return values;
+  }
+
   private async get<T>(path: string, schema: z.ZodType<T>, query: Record<string, SearchValue> = {}): Promise<T> {
     const url = new URL(path, this.baseUrl);
     for (const [key, value] of Object.entries(query)) {
@@ -223,5 +269,28 @@ function mapLiveSummary(item: z.infer<typeof liveSummarySchema>): LiveSummary {
     avgAcu: item.avg_acu ?? null,
     liveSessionCount: item.live_session_count,
     anchorCount: item.anchor_count,
+  };
+}
+
+function mapVideoWithMetrics(item: z.infer<typeof videoWithMetricsSchema>): VideoWithMetrics {
+  return {
+    contentConfigId: item.content_config_id,
+    videoId: item.video_id,
+    publishTime: item.publish_time,
+    authorUid: item.author_uid ?? null,
+    authorName: item.author_name ?? null,
+    title: item.title ?? null,
+    label: item.label ?? null,
+    latestPlayCount: item.latest_play_count ?? null,
+    metrics: item.metrics.map((metric) => ({
+      statDate: metric.stat_date,
+      isDailyFinal: metric.is_daily_final,
+      playCount: metric.play_count ?? null,
+      playIncrement: metric.play_increment ?? null,
+      likeCount: metric.like_count ?? null,
+      likeIncrement: metric.like_increment ?? null,
+      commentCount: metric.comment_count ?? null,
+      commentIncrement: metric.comment_increment ?? null,
+    })),
   };
 }

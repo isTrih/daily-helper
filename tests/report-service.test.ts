@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { dateInTimezone, previousIsoDate, ReportService } from "../src/report-service.ts";
-import type { LiveSummary, ProjectPeriod, VideoSummary } from "../src/types.ts";
+import type { LiveSummary, ProjectPeriod, VideoSummary, VideoWithMetrics } from "../src/types.ts";
 
 const period: ProjectPeriod = {
   activityPeriodId: 10,
@@ -160,5 +160,91 @@ describe("ReportService", () => {
     expect(result?.video.trend).toHaveLength(31);
     expect(result?.video.trend.at(-1)).toMatchObject({ date: today, contentCount: 2, authorCount: 1 });
     expect(requestedDates).toContain(previousIsoDate(result!.video.trend[0]!.date));
+  });
+
+  test("话题日报按标题关键词过滤逐日指标并隐藏无法归属的直播数据", async () => {
+    let metricsRange: { from?: string; to?: string } = {};
+    let liveRequests = 0;
+    const metric = (statDate: string, playIncrement: number, playCount: number) => ({
+      statDate,
+      isDailyFinal: true,
+      playCount,
+      playIncrement,
+      likeCount: 0,
+      likeIncrement: 1,
+      commentCount: 0,
+      commentIncrement: 1,
+    });
+    const videos: VideoWithMetrics[] = [
+      {
+        contentConfigId: 100,
+        videoId: "topic-1",
+        publishTime: "2026-09-01T08:00:00Z",
+        authorUid: "author-a",
+        authorName: "作者 A",
+        title: "参加 #塔塔万圣捣蛋时刻",
+        label: "游戏攻略",
+        latestPlayCount: 350,
+        metrics: [
+          metric("2026-09-07", 50, 50),
+          metric("2026-09-08", 80, 130),
+          metric("2026-09-09", 100, 230),
+          metric("2026-09-10", 120, 350),
+        ],
+      },
+      {
+        contentConfigId: 100,
+        videoId: "topic-2",
+        publishTime: "2026-09-10T08:00:00Z",
+        authorUid: "author-b",
+        authorName: "作者 B",
+        title: "塔塔万圣捣蛋时刻 新视频",
+        label: null,
+        latestPlayCount: 60,
+        metrics: [metric("2026-09-10", 60, 60)],
+      },
+      {
+        contentConfigId: 100,
+        videoId: "other",
+        publishTime: "2026-09-10T08:00:00Z",
+        authorUid: "author-c",
+        authorName: "作者 C",
+        title: "养萌物来塔塔",
+        label: null,
+        latestPlayCount: 999,
+        metrics: [metric("2026-09-10", 999, 999)],
+      },
+    ];
+    const client = {
+      listProjectPeriods: async () => [period],
+      listContents: async () => [
+        { contentConfigId: 100, activityPeriodId: 10, contentType: "video" },
+        { contentConfigId: 200, activityPeriodId: 10, contentType: "live" },
+      ],
+      getVideosWithMetrics: async (_id: number, range: typeof metricsRange) => {
+        metricsRange = range;
+        return videos;
+      },
+      getLiveSummary: async () => {
+        liveRequests += 1;
+        return { liveExposurePv: 1, avgAcu: 1, liveSessionCount: 1, anchorCount: 1 };
+      },
+    };
+    const service = new ReportService(client as never, "Asia/Shanghai");
+    const [result] = await service.buildReports(
+      [10],
+      "today",
+      true,
+      "2026-09-10",
+      "#塔塔万圣捣蛋时刻",
+    );
+
+    expect(metricsRange).toEqual({ from: "2026-08-31", to: "2026-09-10" });
+    expect(result?.video.cumulative).toMatchObject({ playCount: 410, contentCount: 2, authorCount: 2 });
+    expect(result?.video.today).toMatchObject({ playCount: 180, contentCount: 1, authorCount: 1 });
+    expect(result?.video.topGrowth.map((item) => item.videoId)).toEqual(["topic-1", "topic-2"]);
+    expect(result?.video.trend.at(-1)).toMatchObject({ date: "2026-09-10", playCount: 180 });
+    expect(result?.live.cumulative.liveExposurePv).toBe(0);
+    expect(liveRequests).toBe(0);
   });
 });

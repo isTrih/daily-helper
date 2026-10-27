@@ -23,9 +23,8 @@
 
     <main>
       <section class="hero">
-        <p class="eyebrow">PROJECT INTELLIGENCE</p>
         <h1>把今天的增长，<br /><em>送到该看到的人面前。</em></h1>
-        <p class="hero-copy">选择群聊、项目与期次，一次生成累计数据、今日新增和播放增长 Top 5。</p>
+        <p class="hero-copy">选择群聊、项目、期次与话题分类，即时发送日报，或为每个群保存独立的每日推送计划。</p>
       </section>
 
       <form id="reportForm" class="workspace">
@@ -74,6 +73,17 @@
             <div class="skeleton tall"></div><div class="skeleton tall"></div><div class="skeleton tall"></div>
           </div>
 
+          <fieldset class="topic-filter">
+            <legend>话题分类 <span>可选</span></legend>
+            <p>每个关键词会生成一份独立分类数据；支持直接粘贴多个话题，可带或不带 #。</p>
+            <div class="topic-entry">
+              <label class="sr-only" for="topicInput">话题关键词</label>
+              <input id="topicInput" type="text" maxlength="51" placeholder="#塔塔万圣捣蛋时刻" autocomplete="off" />
+              <button type="button" class="button compact" id="addTopicButton">添加关键词</button>
+            </div>
+            <div id="topicList" class="topic-list" aria-live="polite"></div>
+          </fieldset>
+
           <fieldset class="rank-switch">
             <legend>Top 5 排行口径</legend>
             <label><input type="radio" name="rankingMode" value="today" checked /><span>今日播放增长</span></label>
@@ -114,6 +124,7 @@
               <div><span>项目</span><strong id="projectCount">—</strong></div>
               <div><span>卡片</span><strong id="cardCount">—</strong></div>
               <div><span>群聊</span><strong id="chatCount">—</strong></div>
+              <div><span>分类</span><strong id="topicCount">—</strong></div>
             </div>
             <div id="selectedSummary" class="selected-summary">正在读取项目…</div>
           </div>
@@ -126,8 +137,46 @@
             <button type="button" class="button secondary" id="previewButton">预览数据</button>
             <button type="submit" class="button primary" id="sendButton"><span>立即发送日报</span><b>↗</b></button>
           </div>
-          <p class="fine-print">“立即发送”会真实调用飞书消息接口。自动日报由环境变量中的默认群聊与 Cron 时间控制。</p>
+          <p class="fine-print">“立即发送”会真实调用飞书消息接口；每日计划可在下方按群独立配置和管理。</p>
         </aside>
+
+        <section class="panel schedule-center" aria-labelledby="scheduleTitle">
+          <div class="schedule-intro">
+            <div>
+              <p class="step">DAILY DELIVERY</p>
+              <h2 id="scheduleTitle">每个群，按自己的节奏收到日报</h2>
+              <p>把上方当前选择保存为每日计划。项目、话题、排行口径与卡片参数会一起记录。</p>
+            </div>
+            <span class="timezone-badge" id="timezoneLabel">Asia/Shanghai</span>
+          </div>
+
+          <div class="schedule-editor">
+            <label>
+              <span>计划名称</span>
+              <input id="scheduleName" type="text" maxlength="60" placeholder="例如：塔塔项目早报" autocomplete="off" />
+            </label>
+            <label>
+              <span>每日发送时间</span>
+              <input id="scheduleTime" type="time" value="09:00" />
+            </label>
+            <label class="schedule-toggle">
+              <input id="scheduleLatest" type="checkbox" checked />
+              <span><strong>始终使用所选项目的最新期次</strong><small>关闭后固定为上方当前勾选的期次</small></span>
+            </label>
+            <label class="schedule-toggle">
+              <input id="scheduleEnabled" type="checkbox" checked />
+              <span><strong>保存后立即启用</strong><small>停用的计划会保留配置，但不会自动发送</small></span>
+            </label>
+            <div class="schedule-editor-actions">
+              <button type="button" class="button secondary" id="cancelScheduleButton" hidden>取消编辑</button>
+              <button type="button" class="button primary schedule-save" id="saveScheduleButton"><span>保存每日计划</span></button>
+            </div>
+          </div>
+
+          <div id="scheduleList" class="schedule-list" aria-live="polite">
+            <div class="schedule-empty">正在读取每日推送计划…</div>
+          </div>
+        </section>
       </form>
     </main>
 

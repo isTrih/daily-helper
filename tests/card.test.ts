@@ -168,8 +168,10 @@ describe("buildReportCard", () => {
     expect(json).toContain('"element_id":"project_dashboard"');
     expect(json).toContain('"content":"项目数据看板"');
     expect(json).toContain('"type":"open_url"');
-    expect(json).toContain("https://3h.workspace.lilith.trih.top/?period=1&act=10");
-    expect(json.indexOf("项目数据看板")).toBeLessThan(json.indexOf("有疑问找"));
+    expect(json).toContain(
+      "https://applink.feishu.cn/client/web_app/open?appId=cli_aa04e8e9e9795bda&mode=appCenter&reload=false&lk_target_url=https%3A%2F%2F3h.workspace.lilith.trih.top%2F%3Fperiod%3D1%26act%3D10",
+    );
+    expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("项目数据看板"));
     expect(json.indexOf("有疑问找")).toBeLessThan(json.indexOf("卡片更新于"));
     expect(json).toContain('"tag":"overflow"');
     expect(json).toContain('"action":"card_tools"');
@@ -192,10 +194,68 @@ describe("buildReportCard", () => {
       allPeriods: [dashboardPeriod],
       state: { scope: "period", periodIds: [61], selectedPeriodId: 61, rankingMode: "today" },
     });
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const actionRow = elements.find(
+      (element) => element.tag === "column_set" && JSON.stringify(element).includes('"element_id":"project_dashboard"'),
+    );
+    const dashboardColumn = (actionRow?.columns as Array<{ elements: Array<Record<string, unknown>> }>).find(
+      (column) => column.elements.some((element) => element.element_id === "project_dashboard"),
+    );
+    const dashboard = dashboardColumn?.elements[0] as {
+      behaviors: Array<{ default_url: string; type: string }>;
+    };
+    const appLink = new URL(dashboard.behaviors[0]!.default_url);
+
+    expect(appLink.origin + appLink.pathname).toBe("https://applink.feishu.cn/client/web_app/open");
+    expect(appLink.searchParams.get("appId")).toBe("cli_aa04e8e9e9795bda");
+    expect(appLink.searchParams.get("mode")).toBe("appCenter");
+    expect(appLink.searchParams.get("reload")).toBe("false");
+
+    const target = new URL(appLink.searchParams.get("lk_target_url")!);
+    expect(target.origin + target.pathname).toBe("https://3h.workspace.lilith.trih.top/");
+    expect([...target.searchParams.entries()]).toEqual([
+      ["period", "3"],
+      ["act", "61"],
+    ]);
+  });
+
+  test("单项目卡片把看板和原操作按钮并排放在底部操作区", () => {
+    const card = buildReportCard({
+      reports: [report(periods[0]!)],
+      allPeriods: periods,
+      state: {
+        scope: "period",
+        periodIds: [10],
+        selectedPeriodId: 10,
+        rankingMode: "period",
+        controlsMode: "tools",
+        interactiveExpiresAt: "2026-11-10T12:00:00.000Z",
+      },
+      controlsMode: "tools",
+      timezone: "Asia/Shanghai",
+    });
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const metadataRow = elements.find(
+      (element) => element.tag === "column_set" && JSON.stringify(element).includes('"element_id":"report_contact"'),
+    );
+    const actionRow = elements.find(
+      (element) => element.tag === "column_set" && JSON.stringify(element).includes('"element_id":"project_dashboard"'),
+    );
+    const metadataJson = JSON.stringify(metadataRow);
+    const actionJson = JSON.stringify(actionRow);
     const json = JSON.stringify(card);
 
-    expect(json).toContain("https://3h.workspace.lilith.trih.top/?period=3&act=61");
-    expect(json).not.toContain("61%E3%80%82");
+    expect(metadataJson).not.toContain('"element_id":"project_dashboard"');
+    expect(metadataJson).not.toContain('"element_id":"card_tools"');
+    expect(actionJson).toContain('"element_id":"project_dashboard"');
+    expect(actionJson).toContain('"element_id":"card_tools"');
+    expect(actionJson.indexOf('"element_id":"project_dashboard"')).toBeLessThan(
+      actionJson.indexOf('"element_id":"card_tools"'),
+    );
+    expect(actionJson).toContain('"type":"primary"');
+    expect(actionJson).toContain('"token":"chart-pie_outlined"');
+    expect(json.match(/"element_id":"project_dashboard"/g)).toHaveLength(1);
+    expect(json.match(/"element_id":"card_tools"/g)).toHaveLength(1);
   });
 
   test("单项目标题使用 period，项目 1 使用金色主题", () => {

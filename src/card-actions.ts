@@ -8,6 +8,7 @@ import {
 } from "./card.ts";
 import type { CardActionResponse, LongConnectionCardActionEvent } from "./lark-service.ts";
 import { dateInTimezone, ReportService } from "./report-service.ts";
+import { normalizeTopicKeyword } from "./topics.ts";
 import type { CardJson, CardViewState, ProjectColors, ProjectIcons } from "./types.ts";
 
 const LOADING_CARD_DELAY_MS = 2_600;
@@ -37,6 +38,7 @@ const actionValueSchema = z.object({
   controls_mode: z.enum(["full", "tools"]).default("full"),
   expires_at: z.string().optional(),
   report_date: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("")]).optional(),
+  topic_keyword: z.string().trim().max(51).transform(normalizeTopicKeyword).optional(),
   return_view: z.enum(["full", "collapsed"]).optional(),
 });
 
@@ -112,6 +114,7 @@ export function createCardActionHandler(
           controlsMode: action.controls_mode,
           ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
           reportDate,
+          ...(action.topic_keyword ? { topicKeyword: action.topic_keyword } : {}),
         };
       } else if (actionType === "show_latest") {
         if (originPeriodIds.length === 0) throw new Error("卡片未包含可选期次");
@@ -126,6 +129,7 @@ export function createCardActionHandler(
           controlsMode: action.controls_mode,
           ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
           reportDate,
+          ...(action.topic_keyword ? { topicKeyword: action.topic_keyword } : {}),
         };
       } else {
         const selectedPeriodId = Number(action.selected_period_id);
@@ -145,6 +149,7 @@ export function createCardActionHandler(
             controlsMode: action.controls_mode,
             ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
             reportDate,
+            ...(action.topic_keyword ? { topicKeyword: action.topic_keyword } : {}),
           };
         } else {
           reportPeriodIds = originPeriodIds;
@@ -159,6 +164,7 @@ export function createCardActionHandler(
             controlsMode: action.controls_mode,
             ...(action.expires_at ? { interactiveExpiresAt: action.expires_at } : {}),
             reportDate,
+            ...(action.topic_keyword ? { topicKeyword: action.topic_keyword } : {}),
           };
         }
       }
@@ -233,6 +239,7 @@ async function buildActionResponse(args: {
       state.rankingMode,
       state.showTrend === true && reportPeriodIds.length === 1,
       state.reportDate,
+      state.topicKeyword,
     ),
   ]);
   const card = actionType === "collapse_card"

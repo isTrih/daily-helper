@@ -1,5 +1,14 @@
-import type { PeriodReport, ProjectPeriod, RankingMode, VideoSummary, VideoTrendPoint } from "./types.ts";
+import type {
+  PeriodReport,
+  ProjectPeriod,
+  RankingMode,
+  VideoGrowth,
+  VideoSummary,
+  VideoTrendPoint,
+  VideoWithMetrics,
+} from "./types.ts";
 import { emptyLiveSummary, emptyVideoSummary, XingtuClient } from "./xingtu-client.ts";
+import { matchesTopicKeyword, normalizeTopicKeyword } from "./topics.ts";
 
 interface MetadataCache {
   expiresAt: number;
@@ -31,7 +40,7 @@ export class ReportService {
 
   async latestPeriods(projectIds?: number[]): Promise<ProjectPeriod[]> {
     const periods = await this.listPeriods();
-    const allowed = projectIds ? new Set(projectIds) : undefined;
+    const allowed = projectIds && projectIds.length > 0 ? new Set(projectIds) : undefined;
     return periods
       .filter((period) => period.isLatest && (!allowed || allowed.has(period.projectId)))
       .sort((a, b) => this.compareProjects(a.projectId, b.projectId));
@@ -42,6 +51,7 @@ export class ReportService {
     rankingMode: RankingMode,
     includeTrend = false,
     reportDate = dateInTimezone(this.timezone),
+    topicKeyword?: string,
   ): Promise<PeriodReport[]> {
     if (!isIsoDate(reportDate)) throw new Error("日报日期无效");
     const metadata = await this.getMetadata();
@@ -59,6 +69,7 @@ export class ReportService {
         rankingMode,
         includeTrend,
         reportDate,
+        topicKeyword,
       )),
     );
     return reports.sort((a, b) => this.compareProjects(a.period.projectId, b.period.projectId));
@@ -70,8 +81,10 @@ export class ReportService {
     rankingMode: RankingMode,
     includeTrend: boolean,
     reportDate: string,
+    topicKeyword?: string,
   ): Promise<PeriodReport> {
-    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${reportDate}`;
+    const normalizedTopic = topicKeyword ? normalizeTopicKeyword(topicKeyword) : "";
+    const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${reportDate}:${normalizedTopic.toLocaleLowerCase("zh-CN")}`;
     const cached = this.reportCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
@@ -88,6 +101,50 @@ export class ReportService {
     const liveConfig = contents.find(
       (item) => item.activityPeriodId === period.activityPeriodId && item.contentType === "live",
     );
+
+    if (normalizedTopic) {
+      const metricsFrom = minIsoDate(previousIsoDate(from), twoDaysBeforeYesterday);
+      const metricsTo = today > to ? today : to;
+      const videos = videoConfig
+        ? (await this.client.getVideosWithMetrics(videoConfig.contentConfigId, {
+            from: metricsFrom,
+            to: metricsTo,
+          })).filter((video) => matchesTopicKeyword(video.title, normalizedTopic))
+        : [];
+      const videoToday = summarizeTopicVideos(videos, today, today);
+      const videoYesterday = summarizeTopicVideos(videos, yesterday, yesterday);
+      const videoDayBeforeYesterday = summarizeTopicVideos(videos, dayBeforeYesterday, dayBeforeYesterday);
+      const videoTwoDaysBeforeYesterday = summarizeTopicVideos(
+        videos,
+        twoDaysBeforeYesterday,
+        twoDaysBeforeYesterday,
+      );
+      const rankingRange = rankingMode === "today"
+        ? { from: today, to: today }
+        : rankingMode === "yesterday"
+          ? { from: yesterday, to: yesterday }
+          : { from, to };
+      const value: PeriodReport = {
+        period,
+        range: { from, to, today, yesterday, dayBefore: dayBeforeYesterday },
+        video: {
+          cumulative: summarizeTopicVideos(videos, from, to),
+          today: withVideoCountDeltas(videoToday, videoYesterday),
+          yesterday: withVideoCountDeltas(videoYesterday, videoDayBeforeYesterday),
+          dayBefore: withVideoCountDeltas(videoDayBeforeYesterday, videoTwoDaysBeforeYesterday),
+          topGrowth: topicTopGrowth(videos, rankingRange.from, rankingRange.to, 5),
+          trend: includeTrend ? buildTopicVideoTrend(from, to, videos) : [],
+        },
+        live: {
+          cumulative: emptyLiveSummary(),
+          today: emptyLiveSummary(),
+          yesterday: emptyLiveSummary(),
+          dayBefore: emptyLiveSummary(),
+        },
+      };
+      this.reportCache.set(cacheKey, { value, expiresAt: Date.now() + this.cacheTtlMs });
+      return value;
+    }
 
     const dailyVideoRequests = new Map<string, Promise<VideoSummary>>();
     const getDailyVideo = (date: string): Promise<VideoSummary> => {
@@ -198,6 +255,79 @@ export class ReportService {
     if (bIndex >= 0) return 1;
     return a - b;
   }
+}
+
+function summarizeTopicVideos(videos: VideoWithMetrics[], from: string, to: string): VideoSummary {
+  let playCount = 0;
+  let likeCount = 0;
+  let commentCount = 0;
+  let contentCount = 0;
+  const authors = new Set<string>();
+
+  for (const video of videos) {
+    const metrics = video.metrics.filter((metric) => metric.statDate >= from && metric.statDate <= to);
+    if (metrics.length === 0) continue;
+    contentCount += 1;
+    const author = video.authorUid ?? video.authorName;
+    if (author) authors.add(author);
+    for (const metric of metrics) {
+      playCount += metric.playIncrement ?? 0;
+      likeCount += metric.likeIncrement ?? 0;
+      commentCount += metric.commentIncrement ?? 0;
+    }
+  }
+
+  return { playCount, likeCount, commentCount, contentCount, authorCount: authors.size };
+}
+
+function topicTopGrowth(
+  videos: VideoWithMetrics[],
+  from: string,
+  to: string,
+  limit: number,
+): VideoGrowth[] {
+  return videos
+    .flatMap((video): VideoGrowth[] => {
+      const metrics = video.metrics
+        .filter((metric) => metric.statDate >= from && metric.statDate <= to)
+        .sort((a, b) => a.statDate.localeCompare(b.statDate));
+      if (metrics.length === 0) return [];
+      const playGrowth = metrics.reduce((sum, metric) => sum + (metric.playIncrement ?? 0), 0);
+      const latest = metrics.at(-1)!;
+      return [{
+        contentConfigId: video.contentConfigId,
+        videoId: video.videoId,
+        publishTime: video.publishTime,
+        authorName: video.authorName,
+        title: video.title,
+        label: video.label,
+        playGrowth,
+        avgDailyPlayGrowth: playGrowth / metrics.length,
+        metricDays: metrics.length,
+        latestPlayCount: latest.playCount ?? video.latestPlayCount,
+        latestStatDate: latest.statDate,
+      }];
+    })
+    .sort((a, b) => b.playGrowth - a.playGrowth || a.videoId.localeCompare(b.videoId))
+    .slice(0, limit);
+}
+
+function buildTopicVideoTrend(from: string, to: string, videos: VideoWithMetrics[]): VideoTrendPoint[] {
+  const dates = isoDateRange(from, to).slice(-31);
+  if (dates.length === 0) return [];
+  const summaries = [previousIsoDate(dates[0]!), ...dates].map((date) =>
+    summarizeTopicVideos(videos, date, date));
+  return dates.map((date, index) => {
+    const current = summaries[index + 1]!;
+    const previous = summaries[index]!;
+    const delta = withVideoCountDeltas(current, previous);
+    return {
+      date,
+      playCount: current.playCount,
+      contentCount: delta.contentCount,
+      authorCount: delta.authorCount,
+    };
+  });
 }
 
 async function buildVideoTrend(

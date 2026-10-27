@@ -3,14 +3,21 @@ import type { AppConfig } from "./config.ts";
 import type { LarkService } from "./lark-service.ts";
 import { ReportOrchestrator } from "./report-orchestrator.ts";
 import type { ReportService } from "./report-service.ts";
+import { deliveryScheduleInputSchema, type ScheduleService } from "./schedule-service.ts";
+import { MAX_TOPIC_KEYWORD_LENGTH, MAX_TOPIC_KEYWORDS, normalizeTopicKeywords } from "./topics.ts";
 
 const reportRequestSchema = z.object({
   periodIds: z.array(z.number().int().positive()).default([]),
+  projectIds: z.array(z.number().int().positive()).default([]),
   mode: z.enum(["combined", "single"]).default("combined"),
   rankingMode: z.enum(["today", "yesterday", "period"]).default("today"),
   enableForward: z.boolean().default(false),
   enableForwardInteraction: z.boolean().default(false),
   showTrend: z.boolean().default(false),
+  topicKeywords: z.array(z.string().trim().min(1).max(MAX_TOPIC_KEYWORD_LENGTH + 1))
+    .max(MAX_TOPIC_KEYWORDS)
+    .default([])
+    .transform(normalizeTopicKeywords),
 });
 
 const sendRequestSchema = reportRequestSchema.extend({
@@ -22,8 +29,9 @@ export function startServer(args: {
   reportService: ReportService;
   larkService?: LarkService;
   orchestrator: ReportOrchestrator;
+  scheduleService?: ScheduleService;
 }) {
-  const { config, reportService, larkService, orchestrator } = args;
+  const { config, reportService, larkService, orchestrator, scheduleService } = args;
 
   const server = Bun.serve({
     hostname: config.host,
@@ -54,7 +62,38 @@ export function startServer(args: {
             ...(chatsError ? { chatsError } : {}),
             defaultChatId: config.lark.defaultChatId ?? "",
             larkConfigured: config.lark.configured,
+            schedules: scheduleService?.list() ?? [],
+            timezone: config.schedule.timezone,
           });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/schedules") {
+          return json({ schedules: scheduleService?.list() ?? [] });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/schedules") {
+          if (!scheduleService) return json({ error: "每日推送计划服务未启用" }, 503);
+          const input = deliveryScheduleInputSchema.parse(await readJson(request));
+          return json({ schedule: await scheduleService.create(input) }, 201);
+        }
+
+        const scheduleMatch = /^\/api\/schedules\/([0-9a-f-]+)$/i.exec(url.pathname);
+        if (scheduleMatch && request.method === "PUT") {
+          if (!scheduleService) return json({ error: "每日推送计划服务未启用" }, 503);
+          const input = deliveryScheduleInputSchema.parse(await readJson(request));
+          const schedule = await scheduleService.update(scheduleMatch[1]!, input);
+          return schedule ? json({ schedule }) : json({ error: "找不到该推送计划" }, 404);
+        }
+        if (scheduleMatch && request.method === "PATCH") {
+          if (!scheduleService) return json({ error: "每日推送计划服务未启用" }, 503);
+          const input = z.object({ enabled: z.boolean() }).parse(await readJson(request));
+          const schedule = await scheduleService.setEnabled(scheduleMatch[1]!, input.enabled);
+          return schedule ? json({ schedule }) : json({ error: "找不到该推送计划" }, 404);
+        }
+        if (scheduleMatch && request.method === "DELETE") {
+          if (!scheduleService) return json({ error: "每日推送计划服务未启用" }, 503);
+          const deleted = await scheduleService.delete(scheduleMatch[1]!);
+          return deleted ? json({ ok: true }) : json({ error: "找不到该推送计划" }, 404);
         }
 
         if (request.method === "POST" && url.pathname === "/api/reports/preview") {

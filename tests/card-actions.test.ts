@@ -177,6 +177,42 @@ describe("折叠按钮组回调", () => {
     expect(JSON.stringify(response.card?.data)).toContain("昨日 TOP · 视频播放");
   });
 
+  test("卡片交互会保留话题关键词筛选", async () => {
+    let requestedTopic = "";
+    const reportService = {
+      ...fakeReportService,
+      buildReports: async (
+        ids: number[],
+        _mode: string,
+        _trend: boolean,
+        _reportDate: string,
+        topicKeyword?: string,
+      ) => {
+        requestedTopic = topicKeyword ?? "";
+        return ids.map((id) => makeReport(periods.find((period) => period.activityPeriodId === id)!));
+      },
+    };
+    const handler = createCardActionHandler(reportService as never, "Asia/Shanghai");
+    const response = await handler({
+      action: {
+        tag: "overflow",
+        option: "rank_period",
+        value: {
+          action: "overflow_action",
+          ranking_mode: "today",
+          scope: "period",
+          period_ids: "53",
+          selected_period_id: "53",
+          topic_keyword: "塔塔万圣捣蛋时刻",
+        },
+      },
+    });
+
+    expect(requestedTopic).toBe("塔塔万圣捣蛋时刻");
+    expect(JSON.stringify(response.card?.data)).toContain('"topic_keyword":"塔塔万圣捣蛋时刻"');
+    expect(JSON.stringify(response.card?.data.header)).toContain("#塔塔万圣捣蛋时刻");
+  });
+
   test("后续操作始终使用卡片发送时固定的报表日期", async () => {
     let requestedReportDate = "";
     const reportService = {

@@ -38,6 +38,24 @@ function report(period: ProjectPeriod): PeriodReport {
   };
 }
 
+function findElementById(value: unknown, elementId: string): Record<string, unknown> | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findElementById(item, elementId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.element_id === elementId) return record;
+  for (const child of Object.values(record)) {
+    const found = findElementById(child, elementId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 describe("ReportOrchestrator", () => {
   test("单独日报只保留页脚折叠操作", async () => {
     const reportService = {
@@ -189,5 +207,66 @@ describe("ReportOrchestrator", () => {
     expect((card!.header as { title: { content: string } }).title.content).toBe("项目每日速览");
     expect(JSON.stringify(card)).toContain("项目 1 日报");
     expect(JSON.stringify(card)).toContain("项目 2 日报");
+  });
+
+  test("每个话题关键词生成独立卡片并传入对应看板链接", async () => {
+    const builtTopics: Array<string | undefined> = [];
+    const reportService = {
+      listPeriods: async () => periods,
+      buildReports: async (
+        ids: number[],
+        _ranking: string,
+        _trend: boolean,
+        _date: string,
+        topicKeyword?: string,
+      ) => {
+        builtTopics.push(topicKeyword);
+        return ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!));
+      },
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const cards = await orchestrator.createCards({
+      periodIds: [10],
+      mode: "combined",
+      rankingMode: "today",
+      topicKeywords: ["#塔塔万圣捣蛋时刻", "养萌物来塔塔"],
+    });
+
+    expect(cards).toHaveLength(2);
+    expect(builtTopics).toEqual(["塔塔万圣捣蛋时刻", "养萌物来塔塔"]);
+    for (const [index, topic] of ["塔塔万圣捣蛋时刻", "养萌物来塔塔"].entries()) {
+      const card = cards[index]!;
+      const dashboard = findElementById(card, "project_dashboard") as {
+        behaviors: Array<{ default_url: string }>;
+      };
+      const appLink = new URL(dashboard.behaviors[0]!.default_url);
+      const target = new URL(appLink.searchParams.get("lk_target_url")!);
+      expect(target.searchParams.get("topics")).toBe(JSON.stringify([topic]));
+      expect(target.searchParams.has("topic_match")).toBe(false);
+      expect(JSON.stringify(card.header)).toContain(`#${topic}`);
+    }
+  });
+
+  test("按项目保存的每日计划会在执行时解析最新期次", async () => {
+    let requestedProjectIds: number[] | undefined;
+    const reportService = {
+      listPeriods: async () => periods,
+      latestPeriods: async (projectIds?: number[]) => {
+        requestedProjectIds = projectIds;
+        return periods.filter((item) => projectIds?.includes(item.projectId));
+      },
+      buildReports: async (ids: number[]) => ids.map((id) => report(periods.find((item) => item.activityPeriodId === id)!)),
+    };
+    const orchestrator = new ReportOrchestrator(reportService as never, undefined, "Asia/Shanghai");
+    const cards = await orchestrator.createCards({
+      periodIds: [],
+      projectIds: [2],
+      mode: "combined",
+      rankingMode: "today",
+    });
+
+    expect(requestedProjectIds).toEqual([2]);
+    expect(cards).toHaveLength(1);
+    expect((cards[0]!.header as { title: { content: string } }).title.content).toBe("项目 2 日报");
   });
 });

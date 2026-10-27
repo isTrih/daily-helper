@@ -71,6 +71,29 @@ export interface VideoTrendPoint {
   authorCount: number;
 }
 
+export interface VideoMetricPoint {
+  statDate: string;
+  isDailyFinal: boolean;
+  playCount: number | null;
+  playIncrement: number | null;
+  likeCount: number | null;
+  likeIncrement: number | null;
+  commentCount: number | null;
+  commentIncrement: number | null;
+}
+
+export interface VideoWithMetrics {
+  contentConfigId: number;
+  videoId: string;
+  publishTime: string;
+  authorUid: string | null;
+  authorName: string | null;
+  title: string | null;
+  label: string | null;
+  latestPlayCount: number | null;
+  metrics: VideoMetricPoint[];
+}
+
 export interface PeriodReport {
   period: ProjectPeriod;
   range: { from: string; to: string; today: string; yesterday: string; dayBefore: string };
@@ -101,6 +124,7 @@ export interface CardViewState {
   controlsMode?: "full" | "tools";
   interactiveExpiresAt?: string;
   reportDate?: string;
+  topicKeyword?: string;
 }
 
 export type CardJson = Record<string, unknown>;

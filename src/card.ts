@@ -94,15 +94,25 @@ export function buildReportCard(args: {
   const projectColors = args.projectColors ?? {};
   const projectIcons = args.projectIcons ?? {};
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
-  const identity = cardIdentity(reports, projectColors, projectIcons);
+  const identity = cardIdentity(reports, projectColors, projectIcons, state.topicKeyword);
   const isCombined = state.scope === "combined" && reports.length > 1;
   const { theme, iconKey, title, subtitle } = identity;
   const tagReports = [...new Map(reports.map((report) => [report.period.projectId, report])).values()];
-  const tags = (isCombined && tagReports.length > 1 ? tagReports.slice(0, 3) : []).map((report) => ({
+  const projectTags = (isCombined && tagReports.length > 1 ? tagReports.slice(0, state.topicKeyword ? 2 : 3) : []).map((report) => ({
     tag: "text_tag",
     text: { tag: "plain_text", content: report.period.projectDisplayName },
     color: colorFor(report.period.projectId, projectColors),
   }));
+  const tags = [
+    ...(state.topicKeyword
+      ? [{
+          tag: "text_tag",
+          text: { tag: "plain_text", content: `#${state.topicKeyword}` },
+          color: theme,
+        }]
+      : []),
+    ...projectTags,
+  ];
 
   const elements: CardElement[] = controlsMode === "full"
     ? [...controls(allPeriods, state, timezone), { tag: "hr", margin: "4px 0 8px 0" }]
@@ -129,12 +139,6 @@ export function buildReportCard(args: {
     horizontal_spacing: "6px",
     margin: "10px 0 0 0",
     columns: [
-      {
-        tag: "column",
-        width: "auto",
-        vertical_align: "center",
-        elements: [dashboardButton(dashboardReport)],
-      },
       {
         tag: "column",
         width: "weighted",
@@ -190,46 +194,50 @@ export function buildReportCard(args: {
       },
     ],
   });
-  if (state.interactiveExpiresAt || controlsMode === "tools") {
-    elements.push({
-      tag: "column_set",
-      flex_mode: "none",
-      horizontal_spacing: "8px",
-      margin: "2px 0 0 0",
-      columns: [
-        ...(controlsMode === "tools"
-          ? [{
-              tag: "column",
-              width: "auto",
-              vertical_align: "center",
-              elements: [cardToolsOverflow(state, "full")],
-            }]
-          : []),
-        {
-          tag: "column",
-          width: "weighted",
-          weight: 1,
-          elements: [],
-        },
-        ...(state.interactiveExpiresAt
-          ? [{
-              tag: "column",
-              width: "auto",
-              vertical_align: "center",
-              elements: [{
-                tag: "div",
-                text: {
-                  tag: "lark_md",
-                  content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
-                  text_size: "notation",
-                  text_align: "right",
-                },
-              }],
-            }]
-          : []),
-      ],
-    });
-  }
+  elements.push({
+    tag: "column_set",
+    flex_mode: "none",
+    horizontal_spacing: "8px",
+    margin: "2px 0 0 0",
+    columns: [
+      {
+        tag: "column",
+        width: "auto",
+        vertical_align: "center",
+        elements: [dashboardButton(dashboardReport, state.topicKeyword)],
+      },
+      ...(controlsMode === "tools"
+        ? [{
+            tag: "column",
+            width: "auto",
+            vertical_align: "center",
+            elements: [cardToolsOverflow(state, "full")],
+          }]
+        : []),
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [],
+      },
+      ...(state.interactiveExpiresAt
+        ? [{
+            tag: "column",
+            width: "auto",
+            vertical_align: "center",
+            elements: [{
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: `<font color='grey'>卡片可互动有效期至 ${formatInteractionExpiry(state.interactiveExpiresAt, timezone)}</font>`,
+                text_size: "notation",
+                text_align: "right",
+              },
+            }],
+          }]
+        : []),
+    ],
+  });
 
   return {
     schema: "2.0",
@@ -268,7 +276,7 @@ export function buildCollapsedReportCard(args: {
   const { reports, state } = args;
   if (reports.length === 0) throw new Error("日报至少需要包含一个项目期次");
 
-  const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {});
+  const identity = cardIdentity(reports, args.projectColors ?? {}, args.projectIcons ?? {}, state.topicKeyword);
   return {
     schema: "2.0",
     config: interactiveCardConfig(identity.title, identity.subtitle, state),
@@ -484,11 +492,13 @@ function cardIdentity(
   reports: PeriodReport[],
   projectColors: ProjectColors,
   projectIcons: ProjectIcons,
+  topicKeyword?: string,
 ): {
   title: string;
   subtitle: string;
   theme: CardColor;
   iconKey?: string;
+  topicKeyword?: string;
 } {
   const focusedReport = reports.length === 1 ? reports[0] : undefined;
   const firstReport = reports[0]!;
@@ -507,6 +517,7 @@ function cardIdentity(
     ...(themedReport && projectIcons[themedReport.period.projectId]
       ? { iconKey: projectIcons[themedReport.period.projectId] }
       : {}),
+    ...(topicKeyword ? { topicKeyword } : {}),
   };
 }
 
@@ -532,6 +543,15 @@ function cardHeader(identity: ReturnType<typeof cardIdentity>): Record<string, u
     template: identity.theme,
     title: { tag: "plain_text", content: identity.title },
     subtitle: { tag: "plain_text", content: identity.subtitle },
+    ...(identity.topicKeyword
+      ? {
+          text_tag_list: [{
+            tag: "text_tag",
+            text: { tag: "plain_text", content: `#${identity.topicKeyword}` },
+            color: identity.theme,
+          }],
+        }
+      : {}),
     icon: identity.iconKey
       ? { tag: "custom_icon", img_key: identity.iconKey }
       : { tag: "standard_icon", token: "chart-pie_outlined" },
@@ -585,6 +605,7 @@ function cardStateValue(state: CardViewState): Record<string, string> {
     controls_mode: state.controlsMode ?? "full",
     expires_at: state.interactiveExpiresAt ?? "",
     report_date: state.reportDate ?? "",
+    topic_keyword: state.topicKeyword ?? "",
   };
 }
 
@@ -727,19 +748,26 @@ function button(
   };
 }
 
-function dashboardButton(report: PeriodReport): CardElement {
-  const url = new URL("https://3h.workspace.lilith.trih.top/");
-  url.searchParams.set("period", String(report.period.projectId));
-  url.searchParams.set("act", String(report.period.activityPeriodId));
+function dashboardButton(report: PeriodReport, topicKeyword?: string): CardElement {
+  const targetUrl = new URL("https://3h.workspace.lilith.trih.top/");
+  targetUrl.searchParams.set("period", String(report.period.projectId));
+  targetUrl.searchParams.set("act", String(report.period.activityPeriodId));
+  if (topicKeyword) targetUrl.searchParams.set("topics", JSON.stringify([topicKeyword]));
+  const appLink = new URL("https://applink.feishu.cn/client/web_app/open");
+  appLink.searchParams.set("appId", "cli_aa04e8e9e9795bda");
+  appLink.searchParams.set("mode", "appCenter");
+  appLink.searchParams.set("reload", "false");
+  appLink.searchParams.set("lk_target_url", targetUrl.toString());
 
   return {
     tag: "button",
     element_id: "project_dashboard",
-    type: "default",
+    type: "primary",
     size: "small",
     width: "default",
-    text: { tag: "plain_text", content: "项目数据看板" },
-    behaviors: [{ type: "open_url", default_url: url.toString() }],
+    icon: { tag: "standard_icon", token: "chart-pie_outlined" },
+    text: { tag: "plain_text", content: topicKeyword ? "话题数据看板" : "项目数据看板" },
+    behaviors: [{ type: "open_url", default_url: appLink.toString() }],
   };
 }
 

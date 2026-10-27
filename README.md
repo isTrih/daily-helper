@@ -11,9 +11,11 @@
 - 单期卡片可显示最近最多 31 天的全宽数据趋势：每日视频播放使用左轴面积图，新增稿件和新增作者使用右轴折线图，并使用项目主题的衍生色系。
 - 顶部操作区的折叠按钮组可显示或隐藏单期趋势图、将日报收起为精简版本并重新展开；撤回操作会进入确认卡片，确认后调用飞书消息撤回接口，取消则恢复此前视图。
 - 互动卡片采用两行页脚，第二行展示“卡片可互动有效期至 YY-MM-DD”；发送时同时锁定日报日期，后续切换、加载、收起和展开不会改变每日、累计、趋势或 TOP 的数据日期，历史日报改用具体月日标注。
-- 页脚左侧提供“项目数据看板”跳转按钮，按当前卡片动态填充 `period=<project_id>` 与 `act=<activity_period_id>` 参数。
+- 页脚操作区提供“项目数据看板”飞书 AppLink 按钮，按当前卡片动态填充 `period=<project_id>` 与 `act=<activity_period_id>` 参数；单项目卡片中与原有操作按钮同排展示。
 - 网页读取当前机器人所在群聊，可配置多合一或单独日报、勾选项目及期次、排行口径、趋势图及卡片转发权限；同一个项目最多可同时选择两个期次，多合一模式会把同项目两期直接放在一张卡中。
-- 环境变量指定默认自动发送群，Cron 定时发送所有项目的最新期次。
+- 网页可配置最多 6 个话题关键词（支持带或不带 `#`）。系统按视频标题分别计算累计、日增、趋势与 Top 5，每个关键词生成独立卡片；卡片页脚看板 AppLink 只追加当前分类对应的 `topics=["关键词"]`，不会携带比较日期等临时页面状态。
+- 网页可为每个群保存独立的每日推送计划，包括时间、项目、固定/最新期次、话题分类、卡片形式、排行口径、趋势图和转发参数；计划支持编辑、启停和删除，运行结果会持久化到本地 JSON，服务重启后自动恢复。
+- 环境变量指定的默认群聊与 Cron 继续作为兼容的全局自动日报；网页计划与其可同时运行。
 - 单独日报使用接口返回的 `period` 作为标题，不显示项目、期次和排行切换控件，只在页脚保留收起、趋势图和撤回操作；项目 1/2/3 分别使用金色（飞书 `yellow`）、紫色和绿色主题。
 - 群聊中 `@机器人` 后发送“发送数据”或“巴拉拉能量”，以及无需 @ 直接发送“巴拉拉能量”，都会发送所有项目最新一期；`巴拉拉能量 ROK&SAMO` 等指令可按任意符号分隔 `ROK`、`SAMO`、`D1`，并生成所选项目的多合一日报，项目码不区分大小写。
 - 私聊中无需 @ 即可使用“发送数据”、“数据发送”或“巴拉拉能量”及其项目定向形式；私聊生成的卡片始终禁止转发及转发后交互。
@@ -68,6 +70,7 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 | `AUTO_DAILY_REPORT_ENABLED`    | `true`                                | 是否启用自动日报                                      |
 | `DAILY_REPORT_CRON`            | `0 9 * * *`                           | 每日发送 Cron（分、时、日、月、周）                   |
 | `REPORT_TIMEZONE`              | `Asia/Shanghai`                       | 今日口径和定时任务时区                                |
+| `SCHEDULES_FILE`               | `data/schedules.json`                 | 网页每日推送计划的持久化文件                          |
 
 未配置飞书凭证时，服务仍可启动，项目数据、管理页和卡片预览可用；读取群聊、实际发送和长连接会停用。
 
@@ -92,6 +95,7 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 - 视频汇总：`GET /api/v1/queries/videos/summary`。
 - 直播汇总：`GET /api/v1/queries/lives/summary`。
 - 增长排行：`GET /api/v1/queries/videos/top-growth?limit=5`。
+- 话题分类：`GET /api/v1/queries/videos/with-metrics?metrics_mode=history`，在服务端按标题包含关键词过滤后汇总逐日增量；直播接口没有话题归属，因此话题分类卡不重复展示直播数据。
 
 所有接口查询并发执行，日报结果短暂缓存 45 秒，以便卡片交互尽量稳定地在飞书的 3 秒响应窗口内完成。
 每个读取请求都会携带 `Authorization: Bearer <INTERNAL_API_TOKEN>`；未配置 token 时服务会在启动期间立即报错。
@@ -102,6 +106,11 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 - `GET /api/bootstrap`：项目期次、机器人群聊与默认配置。
 - `POST /api/reports/preview`：生成卡片 JSON，不发送。
 - `POST /api/reports/send`：生成并发送卡片。
+- `GET /api/schedules`：读取所有网页每日推送计划及下次执行时间。
+- `POST /api/schedules`：新增每日推送计划。
+- `PUT /api/schedules/:id`：完整更新每日推送计划。
+- `PATCH /api/schedules/:id`：启用或停用计划。
+- `DELETE /api/schedules/:id`：删除计划。
 
 发送请求示例：
 
@@ -109,15 +118,17 @@ ICON=1-img_v2_xxxxxxxxxxxxxxx,2-img_v2_xxxxxxxxxxxxxxx
 {
   "chatIds": ["oc_xxx"],
   "periodIds": [53, 11, 10],
+  "projectIds": [3, 2, 1],
   "mode": "combined",
   "rankingMode": "today",
+  "topicKeywords": ["塔塔万圣捣蛋时刻", "养萌物来塔塔"],
   "showTrend": true,
   "enableForward": true,
   "enableForwardInteraction": false
 }
 ```
 
-`periodIds` 传空数组时，服务会自动选择每个项目最大的 `activity_period_id`。
+`periodIds` 传空数组时，服务会自动选择 `projectIds` 指定项目的最大 `activity_period_id`；`projectIds` 也为空时选择全部项目的最新期次。每个 `topicKeywords` 条目会生成一份独立分类卡片。
 
 ## 校验与部署
 
@@ -148,6 +159,7 @@ docker run -d \
   --name daily-helper \
   --restart unless-stopped \
   --env-file /opt/daily-helper/.env \
+  -v /opt/daily-helper/data:/app/data \
   -p 3000:3000 \
   <dockerhub-user>/<repository>:latest
 ```

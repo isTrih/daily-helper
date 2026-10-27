@@ -1,10 +1,12 @@
 import { buildReportCard } from "./card.ts";
 import { LarkService } from "./lark-service.ts";
 import { dateInTimezone, ReportService } from "./report-service.ts";
+import { normalizeTopicKeywords } from "./topics.ts";
 import type { CardJson, ProjectColors, ProjectIcons, RankingMode, ReportMode } from "./types.ts";
 
 export interface ReportRequest {
   periodIds: number[];
+  projectIds?: number[];
   mode: ReportMode;
   rankingMode: RankingMode;
   enableForward?: boolean;
@@ -12,6 +14,7 @@ export interface ReportRequest {
   showTrend?: boolean;
   showAllSelected?: boolean;
   isPrivateChat?: boolean;
+  topicKeywords?: string[];
 }
 
 export interface SendReportRequest extends ReportRequest {
@@ -31,7 +34,7 @@ export class ReportOrchestrator {
     const allPeriods = await this.reports.listPeriods();
     const requestedIds = request.periodIds.length > 0
       ? [...new Set(request.periodIds)]
-      : (await this.reports.latestPeriods()).map((period) => period.activityPeriodId);
+      : (await this.reports.latestPeriods(request.projectIds)).map((period) => period.activityPeriodId);
     if (requestedIds.length === 0) throw new Error("没有可发送的项目期次");
     const periodsById = new Map(allPeriods.map((period) => [period.activityPeriodId, period]));
     const requestedPeriods = requestedIds.map((periodId) => {
@@ -48,6 +51,8 @@ export class ReportOrchestrator {
     const enableForward = request.isPrivateChat ? false : request.enableForward ?? false;
     const enableForwardInteraction = enableForward && (request.enableForwardInteraction ?? false);
     const showTrend = request.showTrend ?? false;
+    const topicKeywords = normalizeTopicKeywords(request.topicKeywords ?? []);
+    const topicVariants: Array<string | undefined> = topicKeywords.length > 0 ? topicKeywords : [undefined];
     const createdAt = new Date();
     const reportDate = dateInTimezone(this.timezone, createdAt);
     const interactiveExpiresAt = new Date(createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000).toISOString();
@@ -57,14 +62,15 @@ export class ReportOrchestrator {
       const combineSelectedPeriods = requestedIds.length > 1 &&
         (periodCountByProject.size === 1 || request.showAllSelected === true);
       const visiblePeriodIds = combineSelectedPeriods ? requestedIds : [initialPeriodId];
-      const periodReports = await this.reports.buildReports(
-        visiblePeriodIds,
-        request.rankingMode,
-        showTrend && visiblePeriodIds.length === 1,
-        reportDate,
-      );
-      return [
-        buildReportCard({
+      return Promise.all(topicVariants.map(async (topicKeyword) => {
+        const periodReports = await this.reports.buildReports(
+          visiblePeriodIds,
+          request.rankingMode,
+          showTrend && visiblePeriodIds.length === 1,
+          reportDate,
+          topicKeyword,
+        );
+        return buildReportCard({
           reports: periodReports,
           allPeriods,
           state: {
@@ -77,16 +83,26 @@ export class ReportOrchestrator {
             showTrend,
             interactiveExpiresAt,
             reportDate,
+            ...(topicKeyword ? { topicKeyword } : {}),
           },
           timezone: this.timezone,
           projectColors: this.projectColors,
           projectIcons: this.projectIcons,
-        }),
-      ];
+        });
+      }));
     }
 
-    const periodReports = await this.reports.buildReports(requestedIds, request.rankingMode, showTrend, reportDate);
-    return periodReports.map((report) =>
+    const reportsByTopic = await Promise.all(topicVariants.map(async (topicKeyword) => ({
+      topicKeyword,
+      reports: await this.reports.buildReports(
+        requestedIds,
+        request.rankingMode,
+        showTrend,
+        reportDate,
+        topicKeyword,
+      ),
+    })));
+    return reportsByTopic.flatMap(({ topicKeyword, reports }) => reports.map((report) =>
       buildReportCard({
         reports: [report],
         allPeriods,
@@ -104,10 +120,11 @@ export class ReportOrchestrator {
           controlsMode: "tools",
           interactiveExpiresAt,
           reportDate,
+          ...(topicKeyword ? { topicKeyword } : {}),
         },
         timezone: this.timezone,
       }),
-    );
+    ));
   }
 
   async send(request: SendReportRequest) {

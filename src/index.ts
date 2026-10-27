@@ -5,6 +5,7 @@ import { readConfig } from "./config.ts";
 import { LarkService } from "./lark-service.ts";
 import { ReportOrchestrator } from "./report-orchestrator.ts";
 import { ReportService } from "./report-service.ts";
+import { ScheduleService, scheduleReportRequest } from "./schedule-service.ts";
 import { startServer } from "./server.ts";
 import { XingtuClient } from "./xingtu-client.ts";
 
@@ -21,11 +22,24 @@ const orchestrator = new ReportOrchestrator(
   config.projectColors,
   config.projectIcons,
 );
+const scheduleService = new ScheduleService(
+  config.schedule.storePath,
+  config.schedule.timezone,
+  async (schedule) => {
+    const result = await orchestrator.send({
+      ...scheduleReportRequest(schedule),
+      chatIds: [schedule.chatId],
+    });
+    console.info(`[schedule] 每日推送“${schedule.name}”发送完成，共 ${result.messageCount} 条消息`);
+  },
+);
+await scheduleService.initialize();
 const server = startServer({
   config,
   reportService,
   ...(larkService ? { larkService } : {}),
   orchestrator,
+  scheduleService,
 });
 const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, projectCodes, { isPrivateChat }) => {
   const latestPeriods = projectCodes ? await reportService.latestPeriods() : [];
@@ -100,6 +114,7 @@ if (config.schedule.enabled && larkService && config.lark.defaultChatId) {
 async function shutdown(signal: string) {
   console.info(`[app] 收到 ${signal}，正在停止服务`);
   scheduledJob?.stop();
+  scheduleService.stop();
   larkService?.close();
   server.stop(true);
   process.exit(0);
