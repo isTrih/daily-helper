@@ -122,18 +122,7 @@ describe("buildReportCard", () => {
     expect(json).toContain("1234567890AB…");
     expect(json).not.toContain("1234567890ABC");
     expect(json).not.toContain("abcdefghij");
-    const collapsiblePanels = (card.body as { elements: Array<Record<string, unknown>> }).elements.filter(
-      (element) => element.tag === "collapsible_panel",
-    );
-    expect(collapsiblePanels).toHaveLength(2);
-    for (const panel of collapsiblePanels) {
-      expect(panel.expanded).toBe(false);
-      expect(panel.header).toEqual(expect.objectContaining({
-        title: { tag: "markdown", content: "**今日 TOP · 视频播放**" },
-        icon_position: "right",
-        icon_expanded_angle: -180,
-      }));
-    }
+    expect(json).not.toContain('"tag":"collapsible_panel"');
     expect(json).toContain("<text_tag color='neutral'>审核通过</text_tag>");
     expect(json.match(/<text_tag color='neutral'>/g)).toHaveLength(2);
     expect(json).toContain('"corner_radius":"12px"');
@@ -225,10 +214,7 @@ describe("buildReportCard", () => {
     expect(header.text_tag_list).toBeUndefined();
     const json = JSON.stringify(card);
     expect(json).toContain("本期 TOP · 视频播放");
-    const panel = (card.body as { elements: Array<Record<string, unknown>> }).elements.find(
-      (element) => element.tag === "collapsible_panel",
-    );
-    expect(panel?.expanded).toBe(false);
+    expect(json).not.toContain('"tag":"collapsible_panel"');
     expect(json).toContain("本期累计数据");
     expect(json.indexOf("今日视频播放")).toBeLessThan(json.indexOf("本期累计数据"));
     expect(json).toContain('"height":"100px"');

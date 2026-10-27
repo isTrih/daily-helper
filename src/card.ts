@@ -865,7 +865,7 @@ function reportElements(
           text_size: "notation",
         },
       },
-      topGrowthPanel(video.topGrowth, timezone, topTitle, growthLabel, true),
+      compactTopGrowthElement(video.topGrowth, timezone, topTitle, growthLabel),
     ];
   }
 
@@ -889,7 +889,15 @@ function reportElements(
       columns: cumulativeMetrics,
     },
     ...(showTrend ? [videoTrendChart(report, color)] : []),
-    topGrowthPanel(video.topGrowth, timezone, topTitle, growthLabel, false),
+    {
+      tag: "div",
+      margin: "4px 0 2px 0",
+      text: {
+        tag: "lark_md",
+        content: `**${topTitle} · 视频播放**`,
+      },
+    },
+    ...topGrowthElements(video.topGrowth, timezone, growthLabel),
   ];
 }
 
@@ -929,42 +937,10 @@ function highlightMetric(
   };
 }
 
-function topGrowthPanel(
-  items: PeriodReport["video"]["topGrowth"],
-  timezone: string,
-  title: string,
-  growthLabel: string,
-  compact: boolean,
-): CardElement {
-  return {
-    tag: "collapsible_panel",
-    expanded: false,
-    margin: "4px 0 0 0",
-    header: {
-      title: { tag: "markdown", content: `**${title} · 视频播放**` },
-      width: "fill",
-      vertical_align: "center",
-      padding: "8px 10px",
-      icon: {
-        tag: "standard_icon",
-        token: "down-small-ccm_outlined",
-        size: "16px 16px",
-      },
-      icon_position: "right",
-      icon_expanded_angle: -180,
-    },
-    border: { color: "grey", corner_radius: "8px" },
-    vertical_spacing: "8px",
-    padding: "4px 10px 10px 10px",
-    elements: compact
-      ? [compactTopGrowthElement(items, timezone, growthLabel)]
-      : topGrowthElements(items, timezone, growthLabel),
-  };
-}
-
 function compactTopGrowthElement(
   items: PeriodReport["video"]["topGrowth"],
   timezone: string,
+  title: string,
   growthLabel: string,
 ): CardElement {
   if (items.length === 0) {
@@ -972,7 +948,7 @@ function compactTopGrowthElement(
       tag: "div",
       text: {
         tag: "lark_md",
-        content: "<font color='grey'>暂无播放增长数据</font>",
+        content: `**${title} · 视频播放**\n<font color='grey'>暂无播放增长数据</font>`,
       },
     };
   }
@@ -991,7 +967,7 @@ function compactTopGrowthElement(
     tag: "div",
     text: {
       tag: "lark_md",
-      content: rows.join("\n"),
+      content: `**${title} · 视频播放**\n${rows.join("\n")}`,
     },
   };
 }
