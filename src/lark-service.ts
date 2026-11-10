@@ -97,6 +97,7 @@ export class LarkService {
   }
 
   async sendCard(chatId: string, card: CardJson): Promise<string> {
+    await this.ensureReportMembers(chatId);
     const cardResponse = await larkRequest(
       "创建卡片实体",
       () => this.client.cardkit.v1.card.create({
@@ -123,6 +124,50 @@ export class LarkService {
     if (!messageId) throw new Error("飞书发送成功但未返回 message_id");
     this.cardIdsByMessageId.set(messageId, cardId);
     return messageId;
+  }
+
+  private async ensureReportMembers(chatId: string): Promise<void> {
+    const chat = await larkRequest("读取发送目标类型", () =>
+      this.client.im.v1.chat.get({ path: { chat_id: chatId } }));
+    assertLarkSuccess(chat.code, chat.msg, "读取发送目标类型");
+    if (chat.data?.chat_mode === "p2p") return;
+    if (!["group", "topic"].includes(chat.data?.chat_mode ?? "")) {
+      throw new Error("无法确认发送目标的会话类型");
+    }
+
+    const missing = new Set(["db9g11bb", "da5da1g1"]);
+    let pageToken: string | undefined;
+    do {
+      const response = await larkRequest("检查日报群成员", () =>
+        this.client.im.v1.chatMembers.get({
+          path: { chat_id: chatId },
+          params: {
+            member_id_type: "user_id", page_size: 100,
+            ...(pageToken ? { page_token: pageToken } : {}),
+          },
+        }));
+      assertLarkSuccess(response.code, response.msg, "检查日报群成员");
+      for (const member of response.data?.items ?? []) {
+        if (member.member_id) missing.delete(member.member_id);
+      }
+      if (missing.size === 0) return;
+      pageToken = response.data?.has_more ? response.data.page_token : undefined;
+      if (response.data?.has_more && !pageToken) throw new Error("读取日报群成员分页不完整");
+    } while (pageToken);
+
+    const response = await larkRequest("邀请李思远、徐亚男加入日报群", () =>
+      this.client.im.v1.chatMembers.create({
+        path: { chat_id: chatId },
+        params: { member_id_type: "user_id" },
+        data: { id_list: [...missing] },
+      }));
+    assertLarkSuccess(response.code, response.msg, "邀请李思远、徐亚男加入日报群");
+    const unresolved = [
+      ...(response.data?.invalid_id_list ?? []),
+      ...(response.data?.not_existed_id_list ?? []),
+      ...(response.data?.pending_approval_id_list ?? []),
+    ];
+    if (unresolved.length) throw new Error(`日报群成员未能全部加入（失败或待审批）：${unresolved.join("、")}`);
   }
 
   async updateCard(messageId: string, card: CardJson): Promise<void> {

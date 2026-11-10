@@ -2,12 +2,70 @@ import { describe, expect, test } from "bun:test";
 import { LarkService } from "../src/lark-service.ts";
 
 function serviceWithClient(client: object): LarkService {
+  const im = (client as { im?: { v1: { chat?: unknown } } }).im;
+  if (im && !im.v1.chat) im.v1.chat = {
+    get: async () => ({ code: 0, data: { chat_mode: "p2p" } }),
+  };
   const service = new LarkService("test_app", "test_secret");
   Object.defineProperty(service, "client", { value: client });
   return service;
 }
 
 describe("LarkService CardKit 卡片", () => {
+  for (const existing of [[], ["db9g11bb"], ["db9g11bb", "da5da1g1"]]) {
+    test(`群聊发送前补齐成员：已有 ${existing.length} 人，支持分页`, async () => {
+      const calls: string[] = [];
+      let invited: string[] = [];
+      const service = serviceWithClient({
+        im: { v1: {
+          chat: { get: async () => ({ code: 0, data: { chat_mode: "group" } }) },
+          chatMembers: {
+            get: async ({ params }: { params: { page_token?: string } }) => {
+              calls.push("members");
+              return { code: 0, data: params.page_token
+                ? { items: existing.map(member_id => ({ member_id })), has_more: false }
+                : { items: [], has_more: true, page_token: "next" } };
+            },
+            create: async ({ data, params }: { data: { id_list: string[] }; params: { member_id_type: string } }) => {
+              expect(params.member_id_type).toBe("user_id");
+              invited = data.id_list;
+              calls.push("invite");
+              return { code: 0, data: {} };
+            },
+          },
+          message: { create: async () => {
+            calls.push("send");
+            return { code: 0, data: { message_id: "om_group" } };
+          } },
+        } },
+        cardkit: { v1: { card: { create: async () => {
+          calls.push("card");
+          return { code: 0, data: { card_id: "card_group" } };
+        } } } },
+      });
+      await service.sendCard("oc_group", { schema: "2.0" });
+      expect(invited).toEqual(["db9g11bb", "da5da1g1"].filter(id => !existing.includes(id)));
+      expect(calls).toEqual(["members", "members", ...(existing.length < 2 ? ["invite"] : []), "card", "send"]);
+    });
+  }
+
+  test("拉群待审批或失败时不发送卡片", async () => {
+    for (const result of [
+      { code: 123, msg: "forbidden" },
+      { code: 0, data: { pending_approval_id_list: ["db9g11bb"] } },
+      { code: 0, data: { invalid_id_list: ["db9g11bb"] } },
+    ]) {
+      const service = serviceWithClient({ im: { v1: {
+        chat: { get: async () => ({ code: 0, data: { chat_mode: "group" } }) },
+        chatMembers: {
+          get: async () => ({ code: 0, data: { items: [], has_more: false } }),
+          create: async () => result,
+        },
+      } } });
+      await expect(service.sendCard("oc_group", { schema: "2.0" })).rejects.toThrow(/邀请|未能全部加入/);
+    }
+  });
+
   test("先创建卡片实体再通过 card_id 发送并更新", async () => {
     let createPayload: unknown;
     let messagePayload: unknown;
