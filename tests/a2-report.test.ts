@@ -27,7 +27,7 @@ test("缺日不误用上一条，零基数和过期数据明确展示",()=>{
 });
 test("A2预览和发送仅从多维表读取，发送只投递所选群聊",async()=>{
  let reads=0;const sends:string[]=[];
- const service=new A2ReportService({readDaily:async()=>{reads++;return rows;}},{sendCard:async(chat)=>{sends.push(chat);return "msg";},updateCard:async()=>{}});
+ const service=new A2ReportService({readDaily:async()=>{reads++;return rows;}},{sendCard:async(chat)=>{sends.push(typeof chat === "string" ? chat : chat.id);return "msg";},updateCard:async()=>{}});
  const preview=await service.preview(["w","rok"]);expect(preview.cards).toHaveLength(1);expect(reads).toBe(2);
  await expect(service.preview(["d1"])).rejects.toThrow();
  const sent=await service.send(["w"],["chat","chat"]);expect(sent.messageCount).toBe(1);expect(sends).toEqual(["chat"]);
@@ -56,4 +56,12 @@ test("读取失败时将原读取卡片更新为失败提示",async()=>{
  const updates:any[]=[];let sends=0;
  const service=new A2ReportService({readDaily:async()=>{throw Error("fixture timeout");}},{sendCard:async()=>{sends++;return"loading-message";},updateCard:async(id,card)=>{updates.push({id,card});}});
  await expect(service.send(["samo"],["private-chat"])).rejects.toThrow("fixture timeout");expect(sends).toBe(1);expect(updates[0].id).toBe("loading-message");expect(updates[0].card.header.title.content).toContain("读取失败");
+});
+
+test("A2混合目标先投递读取卡片、群失败不阻断私聊，私聊默认万国觉醒", async () => {
+ const sends:any[]=[];const updates:any[]=[];const reads:string[]=[];
+ const service=new A2ReportService({readDaily:async name=>{reads.push(name);return rows;}},{sendCard:async(target,card)=>{sends.push(target);if(typeof target==='string')throw Error('group unavailable');return 'om_private';},updateCard:async(id,card)=>{updates.push({id,card});}});
+ await expect(service.send(['w','rok','samo','pgame'],[{type:'chat',id:'oc_bad'},{type:'user',id:'ou_good'}])).rejects.toThrow('1/2');
+ expect(sends).toEqual(['oc_bad',{type:'user',id:'ou_good'}]);expect(reads).toEqual(['万国觉醒']);expect(updates).toHaveLength(1);
+ expect(JSON.stringify(updates[0].card)).toContain('"initial_option":"rok"');expect(updates[0].card.config.enable_forward).toBe(true);
 });

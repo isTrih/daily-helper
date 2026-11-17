@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRecipients, type Recipient } from "./recipients.ts";
 import { A2Base, A2_GAMES, a2Dates } from "./a2-service.ts";
 import type { LarkService } from "./lark-service.ts";
 import type { CardJson } from "./types.ts";
@@ -171,23 +172,31 @@ export class A2ReportService {
     }
     return { cards: [buildA2Card(reports, { gameCodes: input.gameCodes, selectedGame, reportDate, expiresAt })], reports, dashboardUrl: A2_DASHBOARD_URL, viewState: { gameCodes: input.gameCodes, selectedGame, reportDate, expiresAt } };
   }
-  async send(codes: string[], chats: string[], initialView = codes.length === 1 ? codes[0]! : "overview") {
+  async send(codes: string[], chats: Array<string | Recipient>, initialView?: string) {
     if (!this.lark) throw new Error("未配置飞书应用，无法发送 A2 日报");
-    const chatIds = [...new Set(chats.map(chat => chat.trim()).filter(Boolean))];
-    if (!chatIds.length) throw new Error("请选择发送群聊");
+    const targets = normalizeRecipients(chats);
+    if (!targets.length) throw new Error("请选择群聊或用户");
     const allowed = a2ReportRequest.parse({ gameCodes: codes }).gameCodes;
-    if (initialView !== "overview" && !allowed.includes(initialView as never)) throw new Error("默认游戏不在发送范围内");
-    const messages: Array<{ chatId: string; messageId: string }> = [];
+    if (initialView && initialView !== "overview" && !allowed.includes(initialView as never)) throw new Error("默认游戏不在发送范围内");
+    const messages: Array<{ chatId: string; messageId: string; view: string }> = [];
+    const failures: string[] = [];
     const pending = new Set<string>();
     try {
-      for (const chatId of chatIds) {
-        const messageId = await this.lark.sendCard(chatId, buildA2LoadingCard());
-        messages.push({ chatId, messageId }); pending.add(messageId);
+      for (const target of targets) {
+        try {
+          const messageId = await this.lark.sendCard(target.type === "chat" ? target.id : target, buildA2LoadingCard());
+          const view = initialView ?? (target.type === "user" && codes.includes("rok") ? "rok" : codes.length === 1 ? codes[0]! : "overview");
+          messages.push({ chatId: target.id, messageId, view }); pending.add(messageId);
+        } catch (error) { failures.push(`${target.id}: ${error instanceof Error ? error.message : "发送失败"}`); }
       }
-      const { cards } = await this.view(codes, initialView);
-      for (const { messageId } of messages) {
-        await this.lark.updateCard(messageId, cards[0]!); pending.delete(messageId);
+      const cardsByView = new Map<string, CardJson>();
+      for (const { messageId, chatId, view } of messages) {
+        try {
+          if (!cardsByView.has(view)) cardsByView.set(view, (await this.view(codes, view)).cards[0]!);
+          await this.lark.updateCard(messageId, cardsByView.get(view)!); pending.delete(messageId);
+        } catch (error) { failures.push(`${chatId}: ${error instanceof Error ? error.message : "更新失败"}`); }
       }
+      if (failures.length) throw new Error(`${failures.length}/${targets.length} 个收件人发送失败：${failures.join("；")}`);
       return { cardCount: 1, messageCount: messages.length, messages };
     } catch (error) {
       const outcomes = await Promise.allSettled([...pending].map(messageId => this.lark!.updateCard(messageId, buildA2LoadingCard(true))));

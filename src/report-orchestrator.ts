@@ -2,6 +2,7 @@ import { buildReportCard } from "./card.ts";
 import { LarkService } from "./lark-service.ts";
 import { dateInTimezone, ReportService } from "./report-service.ts";
 import { normalizeTopicKeywords } from "./topics.ts";
+import { deliverRecipients, normalizeRecipients, type Recipient } from "./recipients.ts";
 import type { CardJson, ProjectColors, ProjectIcons, RankingMode, ReportMode } from "./types.ts";
 
 export interface ReportRequest {
@@ -18,7 +19,8 @@ export interface ReportRequest {
 }
 
 export interface SendReportRequest extends ReportRequest {
-  chatIds: string[];
+  chatIds?: string[] | undefined;
+  recipients?: Recipient[] | undefined;
 }
 
 export class ReportOrchestrator {
@@ -130,21 +132,23 @@ export class ReportOrchestrator {
 
   async send(request: SendReportRequest) {
     if (!this.lark) throw new Error("未配置 LARK_APP_ID / LARK_APP_SECRET，无法发送飞书消息");
-    const chatIds = [...new Set(request.chatIds.map((id) => id.trim()).filter(Boolean))];
-    if (chatIds.length === 0) throw new Error("请至少选择一个发送群聊");
-    const cards = await this.createCards(request);
+    const targets = normalizeRecipients(request.recipients ?? request.chatIds ?? []);
+    if (targets.length === 0) throw new Error("请至少选择一个群聊或用户");
+    const cards = await this.createCards({ ...request, isPrivateChat: request.isPrivateChat || targets.every(target => target.type === "user") });
+    const privateCards = targets.some(target => target.type === "user") && targets.some(target => target.type === "chat")
+      ? await this.createCards({ ...request, isPrivateChat: true }) : cards;
     const results: Array<{ chatId: string; messageId: string; cardIndex: number }> = [];
 
-    for (const chatId of chatIds) {
-      for (const [cardIndex, card] of cards.entries()) {
-        const messageId = await this.lark.sendCard(chatId, card);
-        results.push({ chatId, messageId, cardIndex });
+    await deliverRecipients(targets, async target => {
+      for (const [cardIndex, card] of (target.type === "user" ? privateCards : cards).entries()) {
+        const messageId = await this.lark!.sendCard(target.type === "chat" ? target.id : target, card);
+        results.push({ chatId: target.id, messageId, cardIndex });
         if (results.length === 1 && this.afterFirstDelivery) {
           try { await this.afterFirstDelivery(); }
           catch { console.error("[a2] 采集失败；请在插件查看状态，后续日报会重试"); }
         }
       }
-    }
+    });
     return { cardCount: cards.length, messageCount: results.length, messages: results };
   }
 }

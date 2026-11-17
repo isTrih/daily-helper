@@ -208,3 +208,14 @@ describe("LarkService CardKit 卡片", () => {
     expect(message).not.toContain("must_not_leak");
   });
 });
+
+test("用户ID发送绕过群成员检查，使用open_id且仍可更新原卡片", async () => {
+  let payload: any; let updates = 0;
+  const service = serviceWithClient({
+    im: { v1: { chat: { get: async () => { throw Error("must not inspect private recipients"); } }, message: { create: async (value: unknown) => { payload = value; return { code: 0, data: { message_id: "om_private" } }; } } } },
+    cardkit: { v1: { card: { create: async () => ({ code: 0, data: { card_id: "card_private" } }), update: async () => { updates++; return { code: 0 }; } } } },
+  });
+  await service.sendCard({ type: "user", id: "ou_private" }, { schema: "2.0" });
+  expect(payload.params.receive_id_type).toBe("open_id"); expect(payload.data.receive_id).toBe("ou_private");
+  await service.updateCard("om_private", { schema: "2.0" }); expect(updates).toBe(1);
+});

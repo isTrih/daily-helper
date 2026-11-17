@@ -107,7 +107,7 @@ describe("A2 私聊口令",()=>{
  test("私聊口令默认选中万国觉醒，保留四游戏下拉范围和转发",async()=>{
   const {createA2CommandHandler}=await import("../src/bot-command.ts");const {A2ReportService,A2_REPORT_GAMES}=await import("../src/a2-report.ts");
   const cards:any[]=[];const initial:any[]=[];const targets:string[]=[];const names:string[]=[];
-  const service=new A2ReportService({readDaily:async name=>{names.push(name);return[{date:"2026-01-01",A2:100000,other_A2:200000}];}},{sendCard:async(chat,card)=>{targets.push(chat);initial.push(card);return"message";},updateCard:async(id,card)=>{expect(id).toBe("message");cards.push(card);}});
+  const service=new A2ReportService({readDaily:async name=>{names.push(name);return[{date:"2026-01-01",A2:100000,other_A2:200000}];}},{sendCard:async(chat,card)=>{targets.push(typeof chat === "string" ? chat : chat.id);initial.push(card);return"message";},updateCard:async(id,card)=>{expect(id).toBe("message");cards.push(card);}});
   let done:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
   const handler=createA2CommandHandler(async chat=>{await service.send(A2_REPORT_GAMES.map(g=>g.code),[chat],"rok");done();});
   await handler(message("a2",[],"p2p"));await finished;

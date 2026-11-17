@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <title>项目快报控制台</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=25" />
   </head>
   <body>
     <div class="ambient ambient-one"></div>
@@ -25,7 +25,7 @@
     <main>
       <section class="hero">
         <h1>把今天的增长，<br /><em>送到该看到的人面前。</em></h1>
-        <p class="hero-copy">选择群聊、项目、期次与话题分类，即时发送日报，或为每个群保存独立的每日推送计划。</p>
+        <p class="hero-copy">选择群聊或用户、项目、期次与话题分类，即时发送日报，或保存独立的每日推送计划。</p>
       </section>
 
       <form id="reportForm" class="workspace">
@@ -39,15 +39,8 @@
           </div>
 
           <fieldset class="field-block">
-            <legend>机器人所在群聊</legend>
-            <div id="chatList" class="choice-list skeleton-list" aria-live="polite">
-              <div class="skeleton"></div><div class="skeleton"></div>
-            </div>
-            <label class="manual-chat">
-              <span>或输入群聊 ID</span>
-              <input id="manualChatId" type="text" placeholder="oc_xxxxxxxxxxxxxxxx" autocomplete="off" />
-            </label>
-            <p class="field-hint" id="chatHint"></p>
+            <legend>群聊和用户</legend>
+            <div id="chatList" aria-live="polite"></div>
           </fieldset>
 
           <div class="divider"></div>
@@ -124,7 +117,7 @@
             <div class="summary-grid">
               <div><span>项目</span><strong id="projectCount">—</strong></div>
               <div><span>卡片</span><strong id="cardCount">—</strong></div>
-              <div><span>群聊</span><strong id="chatCount">—</strong></div>
+              <div><span>收件人</span><strong id="chatCount">—</strong></div>
               <div><span>分类</span><strong id="topicCount">—</strong></div>
             </div>
             <div id="selectedSummary" class="selected-summary">正在读取项目…</div>
@@ -138,14 +131,14 @@
             <button type="button" class="button secondary" id="previewButton">预览数据</button>
             <button type="submit" class="button primary" id="sendButton"><span>立即发送日报</span><b>↗</b></button>
           </div>
-          <p class="fine-print">“立即发送”会真实调用飞书消息接口；每日计划可在下方按群独立配置和管理。</p>
+          <p class="fine-print">“立即发送”会真实调用飞书消息接口；每日计划可在下方按群聊或用户配置和管理。</p>
         </aside>
 
         <section class="panel schedule-center" aria-labelledby="scheduleTitle">
           <div class="schedule-intro">
             <div>
               <p class="step">DAILY DELIVERY</p>
-              <h2 id="scheduleTitle">每个群，按自己的节奏收到日报</h2>
+              <h2 id="scheduleTitle">为群聊和用户设置每日推送</h2>
               <p>把上方当前选择保存为每日计划。项目、话题、排行口径与卡片参数会一起记录。</p>
             </div>
             <span class="timezone-badge" id="timezoneLabel">Asia/Shanghai</span>
@@ -183,6 +176,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <noscript>此页面需要启用 JavaScript 才能配置和发送日报。</noscript>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=25"></script>
   </body>
 </html>

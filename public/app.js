@@ -1,3 +1,4 @@
+import { RecipientPicker, savedRecipients } from "/recipients.js?v=1";
 const state = {
   periods: [],
   chats: [],
@@ -13,8 +14,8 @@ const MAX_TOPIC_KEYWORDS = 6;
 const form = document.querySelector("#reportForm");
 const chatList = document.querySelector("#chatList");
 const projectList = document.querySelector("#projectList");
-const chatHint = document.querySelector("#chatHint");
-const manualChatId = document.querySelector("#manualChatId");
+
+
 const preview = document.querySelector("#preview");
 const previewButton = document.querySelector("#previewButton");
 const sendButton = document.querySelector("#sendButton");
@@ -68,7 +69,7 @@ form.addEventListener("change", (event) => {
   syncForwardPermissions();
   updateSummary();
 });
-manualChatId.addEventListener("input", updateSummary);
+const recipientPicker = new RecipientPicker(chatList, () => queueMicrotask(updateSummary));
 addTopicButton.addEventListener("click", addTopicsFromInput);
 topicInput.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== "," && event.key !== "，") return;
@@ -126,39 +127,7 @@ async function loadBootstrap() {
   }
 }
 
-function renderChats(chats, defaultChatId, error) {
-  chatList.replaceChildren();
-  chatList.classList.remove("skeleton-list");
-  if (!chats.length) {
-    const empty = document.createElement("p");
-    empty.textContent = "暂未读取到群聊，可在下方直接输入 chat_id。";
-    empty.className = "field-hint";
-    chatList.append(empty);
-  }
-
-  for (const chat of chats) {
-    const label = document.createElement("label");
-    label.className = "choice";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.name = "chatId";
-    input.value = chat.chatId;
-    input.checked = chat.chatId === defaultChatId;
-    const copy = document.createElement("span");
-    copy.className = "choice-copy";
-    const strong = document.createElement("strong");
-    strong.textContent = chat.name;
-    const small = document.createElement("small");
-    small.textContent = chat.chatId;
-    copy.append(strong, small);
-    label.append(input, copy);
-    chatList.append(label);
-  }
-
-  const defaultIsListed = chats.some((chat) => chat.chatId === defaultChatId);
-  manualChatId.value = defaultIsListed ? "" : (defaultChatId || "");
-  chatHint.textContent = error || (chats.length ? `已读取 ${chats.length} 个机器人所在群聊` : "");
-}
+function renderChats(chats, defaultChatId, error) { recipientPicker.setChats(chats, defaultChatId, error); }
 
 function renderProjects(periods) {
   projectList.replaceChildren();
@@ -274,19 +243,16 @@ function syncForwardPermissions() {
   if (!enableForwardInput.checked) enableForwardInteractionInput.checked = false;
 }
 
-function collectChatIds() {
-  const ids = [...form.querySelectorAll('input[name="chatId"]:checked')].map((input) => input.value);
-  if (manualChatId.value.trim()) ids.push(manualChatId.value.trim());
-  return [...new Set(ids)];
-}
+function collectRecipients() { return recipientPicker.getSelection(); }
+function validateRecipients() { try { return collectRecipients(); } catch (error) { showToast(error.message, true); return null; } }
 
 function updateSummary() {
   const request = collectRequest();
-  const chatIds = collectChatIds();
+  let recipients; try { recipients = collectRecipients(); } catch { recipients = []; }
   document.querySelector("#projectCount").textContent = String(request.projectCount);
   const baseCardCount = request.mode === "combined" && request.periodIds.length ? 1 : request.periodIds.length;
   document.querySelector("#cardCount").textContent = String(baseCardCount * Math.max(1, request.topicKeywords.length));
-  document.querySelector("#chatCount").textContent = String(chatIds.length);
+  document.querySelector("#chatCount").textContent = String(recipients.length);
   document.querySelector("#topicCount").textContent = request.topicKeywords.length ? String(request.topicKeywords.length) : "全部";
   document.querySelector("#selectedSummary").textContent = request.names.length
     ? `${request.names.join(" · ")}${request.topicKeywords.length ? `｜${request.topicKeywords.map((topic) => `#${topic}`).join(" · ")}` : ""}`
@@ -296,16 +262,17 @@ function updateSummary() {
 async function runAction(kind) {
   addTopicsFromInput();
   const request = collectRequest();
-  const chatIds = collectChatIds();
+  const recipients = validateRecipients();
+  if (!recipients) return;
   if (!request.periodIds.length) return showToast("请至少选择一个项目", true);
-  if (kind === "send" && !chatIds.length) return showToast("请至少选择或输入一个群聊", true);
+  if (kind === "send" && !recipients.length) return showToast("请至少选择或输入一个群聊或用户", true);
 
   setBusy(true);
   try {
     const response = await fetch(kind === "send" ? "/api/reports/send" : "/api/reports/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...request, chatIds, names: undefined, projectCount: undefined }),
+      body: JSON.stringify({ ...request, recipients, names: undefined, projectCount: undefined }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "请求失败");
@@ -395,13 +362,14 @@ function renderTopics() {
 async function saveSchedule() {
   addTopicsFromInput();
   const request = collectRequest();
-  const chatIds = collectChatIds();
-  if (chatIds.length !== 1) return showToast("保存每日计划时请只选择一个群聊", true);
+  const recipients = validateRecipients();
+  if (!recipients) return;
+  if (!recipients.length) return showToast("请选择至少一个群聊或用户", true);
   if (!request.periodIds.length) return showToast("请至少选择一个项目", true);
-  const name = scheduleName.value.trim() || `${chatName(chatIds[0])}日报`;
+  const name = scheduleName.value.trim() || `${recipients.length === 1 ? recipientPicker.name(recipients[0]) : "多收件人"}日报`;
   const payload = {
     name,
-    chatId: chatIds[0],
+    recipients,
     time: scheduleTime.value,
     enabled: scheduleEnabled.checked,
     request: {
@@ -469,7 +437,7 @@ function scheduleItem(schedule) {
   strong.textContent = schedule.name;
   title.append(dot, strong);
   const target = document.createElement("small");
-  target.textContent = `${chatName(schedule.chatId)} · 每日 ${schedule.time}`;
+  target.textContent = `${recipientPicker.describe(savedRecipients(schedule))} · 每日 ${schedule.time}`;
   primary.append(title, target);
 
   const detail = document.createElement("div");
@@ -560,7 +528,7 @@ function editSchedule(schedule) {
   scheduleEnabled.checked = schedule.enabled;
   saveScheduleButton.querySelector("span").textContent = "更新每日计划";
   cancelScheduleButton.hidden = false;
-  applyChatSelection(schedule.chatId);
+  recipientPicker.setSelection(savedRecipients(schedule));
   applyProjectSelection(schedule.request);
   form.elements.mode.value = schedule.request.mode;
   form.elements.rankingMode.value = schedule.request.rankingMode;
@@ -574,11 +542,6 @@ function editSchedule(schedule) {
   document.querySelector("#scheduleTitle").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function applyChatSelection(chatId) {
-  for (const input of form.querySelectorAll('input[name="chatId"]')) input.checked = input.value === chatId;
-  const listed = [...form.querySelectorAll('input[name="chatId"]')].some((input) => input.value === chatId);
-  manualChatId.value = listed ? "" : chatId;
-}
 
 function applyProjectSelection(request) {
   const fixedIds = new Set(request.periodIds.map(Number));
@@ -606,10 +569,6 @@ function resetScheduleEditor() {
   scheduleEnabled.checked = true;
   saveScheduleButton.querySelector("span").textContent = "保存每日计划";
   cancelScheduleButton.hidden = true;
-}
-
-function chatName(chatId) {
-  return state.chats.find((chat) => chat.chatId === chatId)?.name || chatId;
 }
 
 function formatDateTime(value) {

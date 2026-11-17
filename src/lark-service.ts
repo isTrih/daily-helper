@@ -1,5 +1,7 @@
 import * as lark from "@larksuiteoapi/node-sdk";
 import type { CardJson, ChatOption } from "./types.ts";
+import type { Recipient } from "./recipients.ts";
+import { readDirectory } from "./lark-directory.ts";
 
 const silentHttpLogger = {
   error: (..._messages: unknown[]) => {},
@@ -49,6 +51,16 @@ export class LarkService {
   private wsClient: lark.WSClient | undefined;
   private readonly cardIdsByMessageId = new Map<string, string>();
   private lastCardSequence = Math.floor(Date.now() / 1_000) - 1;
+  private directory?: { at: number; result: Awaited<ReturnType<typeof readDirectory>> };
+  private directoryLoading: Promise<Awaited<ReturnType<typeof readDirectory>>> | undefined;
+
+  async listUsers(refresh = false) {
+    if (!refresh && this.directory && Date.now() - this.directory.at < 300_000) return this.directory.result;
+    if (!this.directoryLoading) this.directoryLoading = readDirectory(this.client).then(result => {
+      this.directory = { at: Date.now(), result }; return result;
+    }).finally(() => { this.directoryLoading = undefined; });
+    return this.directoryLoading;
+  }
 
   constructor(
     private readonly appId: string,
@@ -96,8 +108,10 @@ export class LarkService {
     return chats;
   }
 
-  async sendCard(chatId: string, card: CardJson): Promise<string> {
-    await this.ensureReportMembers(chatId);
+  async sendCard(target: string | Recipient, card: CardJson): Promise<string> {
+    const chatId = typeof target === "string" ? target : target.id;
+    const receiveIdType = typeof target !== "string" && target.type === "user" ? "open_id" : "chat_id";
+    if (receiveIdType === "chat_id") await this.ensureReportMembers(chatId);
     const cardResponse = await larkRequest(
       "创建卡片实体",
       () => this.client.cardkit.v1.card.create({
@@ -111,7 +125,7 @@ export class LarkService {
     const response = await larkRequest(
       `向会话 ${chatId} 发送卡片`,
       () => this.client.im.v1.message.create({
-        params: { receive_id_type: "chat_id" },
+        params: { receive_id_type: receiveIdType },
         data: {
           receive_id: chatId,
           msg_type: "interactive",

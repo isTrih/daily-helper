@@ -8,6 +8,7 @@ import type { LarkService } from "./lark-service.ts";
 import { ReportOrchestrator } from "./report-orchestrator.ts";
 import type { ReportService } from "./report-service.ts";
 import { deliveryScheduleInputSchema, type ScheduleService } from "./schedule-service.ts";
+import { recipientsSchema } from "./recipients.ts";
 import { MAX_TOPIC_KEYWORD_LENGTH, MAX_TOPIC_KEYWORDS, normalizeTopicKeywords } from "./topics.ts";
 
 const reportRequestSchema = z.object({
@@ -25,8 +26,9 @@ const reportRequestSchema = z.object({
 });
 
 const sendRequestSchema = reportRequestSchema.extend({
-  chatIds: z.array(z.string().trim().min(1)).min(1),
-});
+  chatIds: z.array(z.string().trim().min(1)).min(1).max(500).optional(),
+  recipients: recipientsSchema.optional(),
+}).refine(value => !!value.recipients?.length || !!value.chatIds?.length, { message: "请选择群聊或用户" });
 
 export function startServer(args: {
   a2Service?: A2Service;
@@ -47,6 +49,12 @@ export function startServer(args: {
     async fetch(request, server) {
       const url = new URL(request.url);
       try {
+        if (request.method === "GET" && url.pathname === "/api/recipients/users") {
+          if (!larkService) return json({ error: "尚未配置飞书应用" }, 503);
+          server.timeout(request, 0);
+          try { return json(await larkService.listUsers(url.searchParams.get("refresh") === "1")); }
+          catch { return json({ error: "无法读取通讯录：请开通应用身份权限 contact:contact.base:readonly、contact:contact:readonly_as_app，配置通讯录可见范围并发布；也可手动填写用户 open_id。" }, 503); }
+        }
         if (url.pathname === "/api/a2/auth") {
           if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
           const origin = request.headers.get("origin");
@@ -77,14 +85,14 @@ export function startServer(args: {
               const input = a2ReportRequest.parse(await readJson(request));
               return json(await args.a2Reports.preview(input.gameCodes));
             }
-            const input = a2ReportRequest.extend({ chatIds: z.array(z.string().trim().min(1).max(128)).min(1).max(20) }).parse(await readJson(request));
-            return json(await args.a2Reports.send(input.gameCodes, input.chatIds));
+            const input = a2ReportRequest.extend({ chatIds: z.array(z.string().trim().min(1).max(128)).min(1).max(500).optional(), recipients: recipientsSchema.optional() }).refine(value => !!value.recipients?.length || !!value.chatIds?.length).parse(await readJson(request));
+            return json(await args.a2Reports.send(input.gameCodes, input.recipients ?? input.chatIds ?? []));
           }
           if (!args.a2Schedules) return json({ error: "A2 计划服务未启用" }, 503);
           const match = /^\/api\/a2\/reports\/schedules\/([0-9a-f-]+)$/i.exec(url.pathname);
           if (url.pathname === "/api/a2/reports/schedules" && request.method === "GET") return json({ schedules: args.a2Schedules.list() });
           if ((url.pathname === "/api/a2/reports/schedules" && request.method === "POST") || (match && request.method === "PUT")) {
-            const input = a2ReportRequest.extend({ name: z.string().trim().min(1).max(60), chatId: z.string().trim().min(1).max(128), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), enabled: z.boolean() }).parse(await readJson(request));
+            const input = a2ReportRequest.extend({ name: z.string().trim().min(1).max(60), chatId: z.string().trim().min(1).max(128).optional(), recipients: recipientsSchema.optional(), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), enabled: z.boolean() }).parse(await readJson(request));
             const value = deliveryScheduleInputSchema.parse({ ...input, request: { a2GameCodes: input.gameCodes } });
             const schedule = match ? await args.a2Schedules.update(match[1]!, value) : await args.a2Schedules.create(value);
             return schedule ? json({ schedule }) : json({ error: "找不到该 A2 计划" }, 404);
@@ -181,6 +189,7 @@ export function startServer(args: {
         }
 
         if (request.method === "POST" && url.pathname === "/api/reports/send") {
+          server.timeout(request, 0);
           const input = sendRequestSchema.parse(await readJson(request));
           const result = await orchestrator.send(input);
           return json({ ok: true, ...result });
@@ -190,6 +199,7 @@ export function startServer(args: {
           return staticFile("index.html", "text/html; charset=utf-8");
         }
         if (request.method === "GET" && url.pathname === "/a2") return staticFile("a2.html", "text/html; charset=utf-8");
+        if (request.method === "GET" && url.pathname === "/recipients.js") return staticFile("recipients.js", "text/javascript; charset=utf-8");
         if (request.method === "GET" && url.pathname === "/a2.js") return staticFile("a2.js", "text/javascript; charset=utf-8");
         if (request.method === "GET" && url.pathname === "/app.js") {
           return staticFile("app.js", "text/javascript; charset=utf-8");
@@ -212,7 +222,7 @@ export function startServer(args: {
   return server;
 }
 
-function staticFile(name: "index.html" | "a2.html" | "a2.js" | "app.js" | "styles.css", type: string): Response {
+function staticFile(name: "index.html" | "a2.html" | "a2.js" | "app.js" | "recipients.js" | "styles.css", type: string): Response {
   const file = Bun.file(new URL(`../public/${name}`, import.meta.url));
   return new Response(file, {
     headers: {

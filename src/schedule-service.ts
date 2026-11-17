@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Cron } from "croner";
 import { z } from "zod";
+import { recipientsSchema } from "./recipients.ts";
 import type { ReportRequest } from "./report-orchestrator.ts";
 import { MAX_TOPIC_KEYWORD_LENGTH, MAX_TOPIC_KEYWORDS, normalizeTopicKeywords } from "./topics.ts";
 
@@ -24,13 +25,14 @@ const scheduledReportRequestSchema = z.object({
 
 export const deliveryScheduleInputSchema = z.object({
   name: z.string().trim().min(1, "计划名称不能为空").max(60),
-  chatId: z.string().trim().min(1, "群聊不能为空").max(128),
+  chatId: z.string().trim().min(1).max(128).optional(),
+  recipients: recipientsSchema.optional(),
   time: dailyTimeSchema,
   enabled: z.boolean().default(true),
   request: scheduledReportRequestSchema,
-});
+}).refine(value => !!value.recipients?.length || !!value.chatId, { message: "请选择至少一个群聊或用户", path: ["recipients"] });
 
-const deliveryScheduleSchema = deliveryScheduleInputSchema.extend({
+const deliveryScheduleSchema = deliveryScheduleInputSchema.safeExtend({
   id: z.string().uuid(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -44,7 +46,7 @@ const scheduleStoreSchema = z.object({
   schedules: z.array(deliveryScheduleSchema),
 });
 
-export type DeliveryScheduleInput = z.infer<typeof deliveryScheduleInputSchema>;
+export type DeliveryScheduleInput = z.input<typeof deliveryScheduleInputSchema>;
 export type DeliverySchedule = z.infer<typeof deliveryScheduleSchema>;
 export type DeliveryScheduleView = DeliverySchedule & { nextRunAt?: string };
 
@@ -91,6 +93,7 @@ export class ScheduleService {
       createdAt: now,
       updatedAt: now,
     };
+    if (schedule.recipients) delete schedule.chatId;
     this.schedules.set(schedule.id, schedule);
     this.syncJob(schedule);
     await this.persist();
@@ -106,6 +109,8 @@ export class ScheduleService {
       ...structuredClone(value),
       updatedAt: new Date().toISOString(),
     };
+    if (value.recipients) delete schedule.chatId;
+    else delete schedule.recipients;
     this.schedules.set(id, schedule);
     this.syncJob(schedule);
     await this.persist();

@@ -282,3 +282,16 @@ test("日报成功发送后触发采集，采集失败仍继续发送其他卡�
   expect(result.messageCount).toBe(2);
   expect(events).toEqual(["send","a2","send"]);
 });
+
+test("混合收件人分别应用私聊转发策略，群失败后用户仍收到日报", async () => {
+  const deliveries: any[] = [];
+  const orchestrator = new ReportOrchestrator({
+    listPeriods: async () => periods,
+    buildReports: async (ids: number[]) => ids.map(id => report(periods.find(p => p.activityPeriodId === id)!)),
+  } as never, { sendCard: async (target: any, card: any) => { deliveries.push({ target, card }); if (typeof target === "string") throw Error("fixture group failure"); return "om_private"; } } as never, "Asia/Shanghai");
+  await expect(orchestrator.send({ recipients: [{ type: "chat", id: "oc_group" }, { type: "user", id: "ou_private" }], periodIds: [10], mode: "combined", rankingMode: "today", enableForward: true, enableForwardInteraction: true })).rejects.toThrow("1/2");
+  expect(deliveries).toHaveLength(2);
+  expect(deliveries[0].card.config.enable_forward).toBe(true);
+  expect(deliveries[1].target).toEqual({ type: "user", id: "ou_private" });
+  expect(deliveries[1].card.config.enable_forward).toBe(false);
+});

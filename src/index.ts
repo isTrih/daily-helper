@@ -9,6 +9,7 @@ import { LarkService } from "./lark-service.ts";
 import { ReportOrchestrator } from "./report-orchestrator.ts";
 import { ReportService } from "./report-service.ts";
 import { ScheduleService, scheduleReportRequest } from "./schedule-service.ts";
+import { scheduleRecipients } from "./recipients.ts";
 import { startServer } from "./server.ts";
 import { XingtuClient } from "./xingtu-client.ts";
 
@@ -24,7 +25,7 @@ const a2Service = larkService ? new A2Service({
 const a2Reports = larkService ? new A2ReportService(new A2Base(config.lark.appId!, config.lark.appSecret!, config.a2.wikiToken), larkService) : undefined;
 const a2Schedules = new ScheduleService(config.a2.schedulesFile, config.schedule.timezone, async schedule => {
   if (!a2Reports || !schedule.request.a2GameCodes) throw new Error("A2 日报服务或游戏选择未配置");
-  await a2Reports.send(schedule.request.a2GameCodes, [schedule.chatId]);
+  await a2Reports.send(schedule.request.a2GameCodes, scheduleRecipients(schedule));
 });
 await a2Schedules.initialize();
 const orchestrator = new ReportOrchestrator(
@@ -41,7 +42,7 @@ const scheduleService = new ScheduleService(
   async (schedule) => {
     const result = await orchestrator.send({
       ...scheduleReportRequest(schedule),
-      chatIds: [schedule.chatId],
+      recipients: scheduleRecipients(schedule),
     });
     console.info(`[schedule] 每日推送“${schedule.name}”发送完成，共 ${result.messageCount} 条消息`);
   },
