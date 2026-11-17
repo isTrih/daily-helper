@@ -3,6 +3,32 @@ import type { LongConnectionMessageEvent } from "./lark-service.ts";
 const sendDataKeywords = new Set(["发送数据", "巴拉拉能量"]);
 const projectKeywords = new Set(["ROK", "SAMO", "D1"]);
 
+export function parseA2Command(event: LongConnectionMessageEvent): { chatId: string; messageId: string } | undefined {
+  const message = event.message;
+  if (message?.chat_type !== "p2p" || message.message_type !== "text" || !message.chat_id || !message.message_id) return;
+  try {
+    const content = JSON.parse(message.content) as { text?: unknown };
+    if (typeof content.text === "string" && content.text.trim().toLowerCase() === "a2") {
+      return { chatId: message.chat_id, messageId: message.message_id };
+    }
+  } catch { /* Ignore malformed or unrelated message content. */ }
+}
+
+export function createA2CommandHandler(sendA2Report: (chatId: string) => Promise<unknown>) {
+  const handledMessages = new Set<string>();
+  return async (event: LongConnectionMessageEvent): Promise<boolean> => {
+    const command = parseA2Command(event);
+    if (!command) return false;
+    if (handledMessages.has(command.messageId)) return true;
+    handledMessages.add(command.messageId);
+    setTimeout(() => handledMessages.delete(command.messageId), 10 * 60 * 1000).unref();
+    void Promise.resolve().then(() => sendA2Report(command.chatId)).catch(error => {
+      console.error("[lark] 私聊 A2 口令发送失败", error);
+    });
+    return true;
+  };
+}
+
 export interface SendDataCommand {
   chatId: string;
   messageId: string;

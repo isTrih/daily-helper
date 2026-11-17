@@ -1,8 +1,8 @@
 import { createA2CardActionHandler, routeReportCardActions } from "./a2-card-actions.ts";
-import { A2ReportService } from "./a2-report.ts";
+import { A2_REPORT_GAMES, A2ReportService } from "./a2-report.ts";
 import { A2Base, A2Service } from "./a2-service.ts";
 import { Cron } from "croner";
-import { createSendDataCommandHandler } from "./bot-command.ts";
+import { createA2CommandHandler, createSendDataCommandHandler } from "./bot-command.ts";
 import { createCardActionHandler } from "./card-actions.ts";
 import { readConfig } from "./config.ts";
 import { LarkService } from "./lark-service.ts";
@@ -82,6 +82,12 @@ const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, proje
   console.info(`[lark] 发送数据指令执行完成，${isPrivateChat ? "私聊" : "群聊"} ${chatId}${projectCodes ? `，项目 ${projectCodes.join("/")}` : ""}，共 ${result.messageCount} 条消息`);
 });
 
+const a2CommandHandler = createA2CommandHandler(async chatId => {
+  if (!a2Reports) throw new Error("A2 日报服务未配置");
+  const result = await a2Reports.send(A2_REPORT_GAMES.map(game => game.code), [chatId]);
+  console.info(`[lark] 私聊 A2 口令执行完成，共 ${result.messageCount} 条消息`);
+});
+
 let scheduledJob: Cron | undefined;
 
 if (larkService && config.lark.longConnectionEnabled) {
@@ -95,7 +101,10 @@ if (larkService && config.lark.longConnectionEnabled) {
         (messageId) => larkService.recallMessage(messageId),
         (messageId, card) => larkService.updateCard(messageId, card),
       ), createA2CardActionHandler(a2Reports, (messageId, card) => larkService.updateCard(messageId, card))),
-      sendDataCommandHandler,
+      async event => {
+        if (await a2CommandHandler(event)) return;
+        await sendDataCommandHandler(event);
+      },
     )
     .catch((error) => console.error("[lark] 无法建立卡片回调长连接", error));
 } else if (!larkService) {
