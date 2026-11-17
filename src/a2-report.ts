@@ -123,9 +123,15 @@ export function buildA2Card(reports: A2GameReport[], state: A2ViewState = { game
     body: { padding: "12px 12px 8px 12px", elements },
   };
 }
+export function buildA2LoadingCard(failed = false): CardJson {
+  return { schema: "2.0", config: { update_multi: true, enable_forward: true, enable_forward_interaction: true },
+    header: { template: failed ? "grey" : "blue", title: { tag: "plain_text", content: failed ? "A2 数据读取失败" : "正在读取 A2 数据" } },
+    body: { elements: [markdown(failed ? "多维表数据暂时读取失败，请稍后重试。" : "正在读取多维表，完成后自动更新这张卡片。") ] },
+  };
+}
 export class A2ReportService {
   private cache = new Map<string, { at: number; rows: A2Point[] }>();
-  constructor(private readonly source: Pick<A2Base, "readDaily">, private readonly lark?: Pick<LarkService, "sendCard">) {}
+  constructor(private readonly source: Pick<A2Base, "readDaily">, private readonly lark?: Pick<LarkService, "sendCard" | "updateCard">) {}
   async preview(codes: string[]) {
     return this.view(codes, codes.length === 1 ? codes[0]! : "overview");
   }
@@ -147,9 +153,22 @@ export class A2ReportService {
     const chatIds = [...new Set(chats.map(chat => chat.trim()).filter(Boolean))];
     if (!chatIds.length) throw new Error("请选择发送群聊");
     a2ReportRequest.parse({ gameCodes: codes });
-    const { cards } = await this.preview(codes);
-    const messages = [];
-    for (const chatId of chatIds) messages.push({ chatId, messageId: await this.lark.sendCard(chatId, cards[0]!) });
-    return { cardCount: 1, messageCount: messages.length, messages };
+    const messages: Array<{ chatId: string; messageId: string }> = [];
+    const pending = new Set<string>();
+    try {
+      for (const chatId of chatIds) {
+        const messageId = await this.lark.sendCard(chatId, buildA2LoadingCard());
+        messages.push({ chatId, messageId }); pending.add(messageId);
+      }
+      const { cards } = await this.preview(codes);
+      for (const { messageId } of messages) {
+        await this.lark.updateCard(messageId, cards[0]!); pending.delete(messageId);
+      }
+      return { cardCount: 1, messageCount: messages.length, messages };
+    } catch (error) {
+      const outcomes = await Promise.allSettled([...pending].map(messageId => this.lark!.updateCard(messageId, buildA2LoadingCard(true))));
+      if (outcomes.some(result => result.status === "rejected")) console.error("[a2-report] 部分读取失败提示未能更新，请重试");
+      throw error;
+    }
   }
 }

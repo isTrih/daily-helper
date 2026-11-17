@@ -27,7 +27,7 @@ test("缺日不误用上一条，零基数和过期数据明确展示",()=>{
 });
 test("A2预览和发送仅从多维表读取，发送只投递所选群聊",async()=>{
  let reads=0;const sends:string[]=[];
- const service=new A2ReportService({readDaily:async()=>{reads++;return rows;}},{sendCard:async(chat)=>{sends.push(chat);return "msg";}});
+ const service=new A2ReportService({readDaily:async()=>{reads++;return rows;}},{sendCard:async(chat)=>{sends.push(chat);return "msg";},updateCard:async()=>{}});
  const preview=await service.preview(["w","rok"]);expect(preview.cards).toHaveLength(1);expect(reads).toBe(2);
  await expect(service.preview(["d1"])).rejects.toThrow();
  const sent=await service.send(["w"],["chat","chat"]);expect(sent.messageCount).toBe(1);expect(sends).toEqual(["chat"]);
@@ -43,4 +43,17 @@ test("游戏配色、红涨绿跌及占比分档，超过100%不截断数值",as
  expect(brandShare(150,100).text).toBe("150.00%");expect(brandShare(10,0).text).toBe("暂无对照");
  const notes=JSON.stringify(a2Footnote({gameCodes:["samo"],selectedGame:"samo",reportDate:"2026-11-15",expiresAt:new Date(Date.now()+86400000).toISOString()}));
  expect(notes).toContain("有疑问找");expect(notes).toContain(A2_CONTACT_ID);expect(notes).toContain("可互动有效期");expect(notes).not.toContain("更新于");expect(notes).not.toContain("数据来源");expect(notes).not.toContain("占比");
+});
+
+test("先发读取小卡片，再读多维表，完成后原消息更新且不重复发送",async()=>{
+ const events:string[]=[];let resolveRows!:(value:typeof rows)=>void;const pending=new Promise<typeof rows>(resolve=>{resolveRows=resolve;});const updates:any[]=[];
+ const service=new A2ReportService({readDaily:async()=>{events.push("read");return pending;}},{sendCard:async(chat,card)=>{events.push("send:"+chat);expect((card.header as any).title.content).toContain("正在读取");return"loading-message";},updateCard:async(id,card)=>{events.push("update:"+id);updates.push(card);}});
+ const work=service.send(["samo"],["private-chat"]);await new Promise(r=>setTimeout(r,0));
+ expect(events).toEqual(["send:private-chat","read"]);expect(updates).toHaveLength(0);
+ resolveRows(rows);const result=await work;expect(result.messageCount).toBe(1);expect(events).toEqual(["send:private-chat","read","update:loading-message"]);expect(updates[0].header.title.content).toContain("万龙觉醒");
+});
+test("读取失败时将原读取卡片更新为失败提示",async()=>{
+ const updates:any[]=[];let sends=0;
+ const service=new A2ReportService({readDaily:async()=>{throw Error("fixture timeout");}},{sendCard:async()=>{sends++;return"loading-message";},updateCard:async(id,card)=>{updates.push({id,card});}});
+ await expect(service.send(["samo"],["private-chat"])).rejects.toThrow("fixture timeout");expect(sends).toBe(1);expect(updates[0].id).toBe("loading-message");expect(updates[0].card.header.title.content).toContain("读取失败");
 });
