@@ -56,8 +56,8 @@ export class RecipientPicker {
     this.onChange();
   }
   render() {
-    const userMode = this.type.value === 'user'; this.reload.hidden = !userMode; this.reload.disabled = this.loading; this.reload.textContent = this.loading ? '正在读取通讯录…' : '刷新用户列表';
-    this.hint.textContent = userMode ? this.loading ? '正在读取应用可见用户，首次加载可能需要一些时间，可先手动填写 ID。' : this.usersError || `应用通讯录可见用户 ${this.users.length} 人；完整列表需要通讯录可见范围为全部员工。` : this.chatsError || `机器人所在群聊 ${this.chats.length} 个；其他群请先将机器人加入群聊。`;
+    const userMode = this.type.value === 'user'; this.reload.hidden = !userMode; this.reload.disabled = this.loading; this.reload.textContent = this.loading ? '正在读取群成员…' : '刷新用户列表';
+    this.hint.textContent = userMode ? this.loading ? '正在读取机器人所在群聊的成员，首次加载可能需要一些时间。' : this.usersError || `机器人所在群聊的成员 ${this.users.length} 人，已跨群去重。` : this.chatsError || `机器人所在群聊 ${this.chats.length} 个；其他群请先将机器人加入群聊。`;
     this.list.replaceChildren(); const items = this.filtered();
     if (!items.length) this.list.append(this.el('p', this.loading ? '正在加载…' : '暂无匹配结果，可手动填写 ID。', 'field-hint'));
     for (const item of items) { const label = this.el('label', '', 'choice'); const input = this.el('input'); input.type = 'checkbox'; input.checked = this.selected.has(this.key(item)); input.value = item.id; input.onchange = () => { if (input.checked && this.selected.size >= 500) { input.checked = false; this.hint.textContent = '每个计划最多选择 500 个收件人。'; return; } input.checked ? this.selected.set(this.key(item), item) : this.selected.delete(this.key(item)); this.changed(); }; const copy = this.el('span', '', 'choice-copy'); copy.append(this.el('strong', item.name), this.el('small', item.id)); label.append(input, copy); this.list.append(label); }

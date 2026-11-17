@@ -53,7 +53,7 @@ export function startServer(args: {
           if (!larkService) return json({ error: "尚未配置飞书应用" }, 503);
           server.timeout(request, 0);
           try { return json(await larkService.listUsers(url.searchParams.get("refresh") === "1")); }
-          catch { return json({ error: "无法读取通讯录：请开通应用身份权限 contact:contact.base:readonly、contact:contact:readonly_as_app，配置通讯录可见范围并发布；也可手动填写用户 open_id。" }, 503); }
+          catch { return json({ error: "无法读取机器人所在群聊的成员：请检查机器人入群状态，以及群聊列表和群成员读取权限（im:chat:read、im:chat.members:read）。" }, 503); }
         }
         if (url.pathname === "/api/a2/auth") {
           if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);

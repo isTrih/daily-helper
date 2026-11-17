@@ -1,7 +1,7 @@
 import * as lark from "@larksuiteoapi/node-sdk";
 import type { CardJson, ChatOption } from "./types.ts";
 import type { Recipient } from "./recipients.ts";
-import { readDirectory } from "./lark-directory.ts";
+import { readGroupUsers } from "./lark-group-members.ts";
 
 const silentHttpLogger = {
   error: (..._messages: unknown[]) => {},
@@ -51,12 +51,12 @@ export class LarkService {
   private wsClient: lark.WSClient | undefined;
   private readonly cardIdsByMessageId = new Map<string, string>();
   private lastCardSequence = Math.floor(Date.now() / 1_000) - 1;
-  private directory?: { at: number; result: Awaited<ReturnType<typeof readDirectory>> };
-  private directoryLoading: Promise<Awaited<ReturnType<typeof readDirectory>>> | undefined;
+  private directory?: { at: number; result: Awaited<ReturnType<typeof readGroupUsers>> };
+  private directoryLoading: Promise<Awaited<ReturnType<typeof readGroupUsers>>> | undefined;
 
   async listUsers(refresh = false) {
     if (!refresh && this.directory && Date.now() - this.directory.at < 300_000) return this.directory.result;
-    if (!this.directoryLoading) this.directoryLoading = readDirectory(this.client).then(result => {
+    if (!this.directoryLoading) this.directoryLoading = this.listChats().then(chats => readGroupUsers(this.client, chats)).then(result => {
       this.directory = { at: Date.now(), result }; return result;
     }).finally(() => { this.directoryLoading = undefined; });
     return this.directoryLoading;
@@ -79,6 +79,7 @@ export class LarkService {
   async listChats(): Promise<ChatOption[]> {
     const chats: ChatOption[] = [];
     let pageToken: string | undefined;
+    const seen = new Set<string>();
 
     do {
       const response = await larkRequest(
@@ -103,6 +104,10 @@ export class LarkService {
         });
       }
       pageToken = response.data?.has_more ? response.data.page_token : undefined;
+      if (response.data?.has_more) {
+        if (!pageToken || seen.has(pageToken)) throw new Error("机器人群聊分页不完整，请刷新重试");
+        seen.add(pageToken);
+      }
     } while (pageToken);
 
     return chats;

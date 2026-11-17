@@ -1,4 +1,4 @@
-import { RecipientPicker, savedRecipients } from "/recipients.js?v=1";
+import { RecipientPicker, savedRecipients } from "/recipients.js?v=2";
 const state = {
   periods: [],
   chats: [],

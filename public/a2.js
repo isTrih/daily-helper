@@ -1,4 +1,4 @@
-import { RecipientPicker, savedRecipients } from "/recipients.js?v=1";
+import { RecipientPicker, savedRecipients } from "/recipients.js?v=2";
 const $ = id => document.getElementById(id);
 const state = { games: [], chats: [], schedules: [], editing: null, busy: false };
 const wan = n => `${(n / 10000).toFixed(2)}万`;
