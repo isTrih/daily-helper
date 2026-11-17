@@ -1,3 +1,7 @@
+import type { A2Service } from "./a2-service.ts";
+import { historyInput } from "./a2-history.ts";
+import { a2ReportRequest, A2_REPORT_GAMES, type A2ReportService } from "./a2-report.ts";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { AppConfig } from "./config.ts";
 import type { LarkService } from "./lark-service.ts";
@@ -25,6 +29,9 @@ const sendRequestSchema = reportRequestSchema.extend({
 });
 
 export function startServer(args: {
+  a2Service?: A2Service;
+  a2Reports?: A2ReportService;
+  a2Schedules?: ScheduleService;
   config: AppConfig;
   reportService: ReportService;
   larkService?: LarkService;
@@ -36,9 +43,76 @@ export function startServer(args: {
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
-    async fetch(request) {
+    maxRequestBodySize: 1024 * 1024,
+    async fetch(request, server) {
       const url = new URL(request.url);
       try {
+        if (url.pathname === "/api/a2/auth") {
+          if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
+          const origin = request.headers.get("origin");
+          if (origin && origin !== url.origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin) && !/^moz-extension:\/\/[0-9a-f-]+$/i.test(origin)) return json({ error: "上传来源无效" }, 403);
+          if (request.headers.get("x-a2-upload") !== "yuntu-session-v1" || !/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return json({ error: "上传协议或 Content-Type 无效，请更新插件" }, 415);
+          if (!args.a2Service) return json({ error: "A2 未启用" }, 503);
+          const body = await request.text();
+          if (body.length > 512000) return json({ error: "登录态过大" }, 413);
+          let input: unknown;
+          try { input = JSON.parse(body); } catch { return json({ error: "上传 JSON 格式无效" }, 400); }
+          return json(await args.a2Service.upload(input));
+        }
+        if (url.pathname.startsWith("/api/a2/reports/")) {
+          if (request.method === "GET" && url.pathname === "/api/a2/reports/bootstrap") {
+            let chats: Awaited<ReturnType<LarkService["listChats"]>> = [];
+            let chatsError = "";
+            try { chats = larkService ? await larkService.listChats() : []; } catch { chatsError = "无法读取群聊，请刷新或手动输入群聊 ID"; }
+            return json({ games: A2_REPORT_GAMES, chats, chatsError, schedules: args.a2Schedules?.list() ?? [], timezone: config.schedule.timezone, defaultChatId: config.lark.defaultChatId ?? "" });
+          }
+          if (["/api/a2/reports/preview", "/api/a2/reports/send"].includes(url.pathname) && request.method === "POST") {
+            if (!args.a2Reports) return json({ error: "A2 日报未配置飞书应用" }, 503);
+            server.timeout(request, 0);
+            if (url.pathname.endsWith("/preview")) {
+              const input = a2ReportRequest.parse(await readJson(request));
+              return json(await args.a2Reports.preview(input.gameCodes));
+            }
+            const input = a2ReportRequest.extend({ chatIds: z.array(z.string().trim().min(1).max(128)).min(1).max(20) }).parse(await readJson(request));
+            return json(await args.a2Reports.send(input.gameCodes, input.chatIds));
+          }
+          if (!args.a2Schedules) return json({ error: "A2 计划服务未启用" }, 503);
+          const match = /^\/api\/a2\/reports\/schedules\/([0-9a-f-]+)$/i.exec(url.pathname);
+          if (url.pathname === "/api/a2/reports/schedules" && request.method === "GET") return json({ schedules: args.a2Schedules.list() });
+          if ((url.pathname === "/api/a2/reports/schedules" && request.method === "POST") || (match && request.method === "PUT")) {
+            const input = a2ReportRequest.extend({ name: z.string().trim().min(1).max(60), chatId: z.string().trim().min(1).max(128), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), enabled: z.boolean() }).parse(await readJson(request));
+            const value = deliveryScheduleInputSchema.parse({ ...input, request: { a2GameCodes: input.gameCodes } });
+            const schedule = match ? await args.a2Schedules.update(match[1]!, value) : await args.a2Schedules.create(value);
+            return schedule ? json({ schedule }) : json({ error: "找不到该 A2 计划" }, 404);
+          }
+          if (match && request.method === "PATCH") {
+            const input = z.strictObject({ enabled: z.boolean() }).parse(await readJson(request));
+            const schedule = await args.a2Schedules.setEnabled(match[1]!, input.enabled);
+            return schedule ? json({ schedule }) : json({ error: "找不到该 A2 计划" }, 404);
+          }
+          if (match && request.method === "DELETE") return json({ ok: await args.a2Schedules.delete(match[1]!) });
+          return json({ error: "Not found" }, 404);
+        }
+        if (url.pathname.startsWith("/api/a2/")) {
+          const expected = Buffer.from(`Bearer ${config.a2.token}`);
+          const actual = Buffer.from(request.headers.get("authorization") ?? "");
+          if (!config.a2.token || actual.length !== expected.length || !timingSafeEqual(actual, expected)) return json({ error: "Unauthorized" }, 401);
+          if (!args.a2Service) return json({ error: "A2 未启用" }, 503);
+          if (request.method === "GET" && url.pathname === "/api/a2/status") return json(await args.a2Service.status());
+          if (request.method === "POST" && url.pathname === "/api/a2/collect") {
+            // A full browser collection exceeds Bun's default 10-second idle limit.
+            server.timeout(request, 0);
+            await args.a2Service.run();
+            return json(await args.a2Service.status());
+          }
+          if (request.method === "POST" && url.pathname === "/api/a2/backfill") {
+            const input = historyInput.parse(await readJson(request));
+            server.timeout(request, 0);
+            const result = await args.a2Service.backfill(input.start, input.end);
+            return json(result, result.status === "success" ? 200 : 502);
+          }
+          return json({ error: "Not found" }, 404);
+        }
         if (request.method === "GET" && url.pathname === "/healthz") {
           return json({ ok: true, larkConfigured: config.lark.configured });
         }
@@ -111,6 +185,8 @@ export function startServer(args: {
         if (request.method === "GET" && url.pathname === "/") {
           return staticFile("index.html", "text/html; charset=utf-8");
         }
+        if (request.method === "GET" && url.pathname === "/a2") return staticFile("a2.html", "text/html; charset=utf-8");
+        if (request.method === "GET" && url.pathname === "/a2.js") return staticFile("a2.js", "text/javascript; charset=utf-8");
         if (request.method === "GET" && url.pathname === "/app.js") {
           return staticFile("app.js", "text/javascript; charset=utf-8");
         }
@@ -132,7 +208,7 @@ export function startServer(args: {
   return server;
 }
 
-function staticFile(name: "index.html" | "app.js" | "styles.css", type: string): Response {
+function staticFile(name: "index.html" | "a2.html" | "a2.js" | "app.js" | "styles.css", type: string): Response {
   const file = Bun.file(new URL(`../public/${name}`, import.meta.url));
   return new Response(file, {
     headers: {

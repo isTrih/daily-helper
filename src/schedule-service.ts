@@ -8,6 +8,7 @@ import { MAX_TOPIC_KEYWORD_LENGTH, MAX_TOPIC_KEYWORDS, normalizeTopicKeywords } 
 const dailyTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "发送时间必须为 HH:mm");
 
 const scheduledReportRequestSchema = z.object({
+  a2GameCodes: z.array(z.enum(["w", "rok", "samo", "pgame"])).min(1).max(4).optional(),
   periodIds: z.array(z.number().int().positive()).default([]),
   projectIds: z.array(z.number().int().positive()).default([]),
   mode: z.enum(["combined", "single"]).default("combined"),

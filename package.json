@@ -12,7 +12,8 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.74.0",
     "croner": "^9.1.0",
-    "zod": "^4.1.8"
+    "zod": "^4.1.8",
+    "playwright-core": "1.65.1"
   },
   "devDependencies": {
     "@types/bun": "^1.2.22",

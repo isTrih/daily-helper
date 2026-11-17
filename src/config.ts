@@ -36,6 +36,11 @@ const envSchema = z.object({
   AUTO_DAILY_REPORT_ENABLED: booleanFromEnv,
   DAILY_REPORT_CRON: z.string().trim().default("0 9 * * *"),
   REPORT_TIMEZONE: z.string().trim().default("Asia/Shanghai"),
+  A2_UPLOAD_TOKEN: z.string().trim().default(""),
+  A2_SCHEDULES_FILE: z.string().trim().optional(),
+  A2_DATA_DIR: z.string().trim().default("data/a2"),
+  A2_WIKI_TOKEN: z.string().trim().default("V1vYwn6OxiayQlkajqWcSVLNnpc"),
+  CHROMIUM_PATH: z.string().trim().default("/usr/bin/chromium"),
   SCHEDULES_FILE: z.string().trim().min(1).default("data/schedules.json"),
 });
 
@@ -70,6 +75,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   }, {});
 
   return {
+    a2: { token: parsed.A2_UPLOAD_TOKEN, dir: parsed.A2_DATA_DIR, schedulesFile: parsed.A2_SCHEDULES_FILE || `${parsed.A2_DATA_DIR}/report-schedules.json`, wikiToken: parsed.A2_WIKI_TOKEN, executablePath: parsed.CHROMIUM_PATH },
     host: parsed.HOST,
     port: parsed.PORT,
     xingtu: {

@@ -270,3 +270,15 @@ describe("ReportOrchestrator", () => {
     expect((cards[0]!.header as { title: { content: string } }).title.content).toBe("项目 2 日报");
   });
 });
+
+test("日报成功发送后触发采集，采集失败仍继续发送其他卡片", async () => {
+  const events: string[] = [];
+  const orchestrator = new ReportOrchestrator({
+    listPeriods: async () => periods,
+    buildReports: async (ids: number[]) => ids.map(id => report(periods.find(p => p.activityPeriodId === id)!)),
+  } as never, {sendCard:async()=>{events.push("send");return "message";}} as never,
+  "Asia/Shanghai", {}, {}, async()=>{events.push("a2");throw Error("fixture");});
+  const result = await orchestrator.send({chatIds:["chat"],periodIds:[10,20],mode:"single",rankingMode:"today"});
+  expect(result.messageCount).toBe(2);
+  expect(events).toEqual(["send","a2","send"]);
+});

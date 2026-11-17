@@ -28,6 +28,7 @@ export class ReportOrchestrator {
     private readonly timezone: string,
     private readonly projectColors: ProjectColors = {},
     private readonly projectIcons: ProjectIcons = {},
+    private readonly afterFirstDelivery?: () => Promise<unknown>,
   ) {}
 
   async createCards(request: ReportRequest): Promise<CardJson[]> {
@@ -138,6 +139,10 @@ export class ReportOrchestrator {
       for (const [cardIndex, card] of cards.entries()) {
         const messageId = await this.lark.sendCard(chatId, card);
         results.push({ chatId, messageId, cardIndex });
+        if (results.length === 1 && this.afterFirstDelivery) {
+          try { await this.afterFirstDelivery(); }
+          catch { console.error("[a2] 采集失败；请在插件查看状态，后续日报会重试"); }
+        }
       }
     }
     return { cardCount: cards.length, messageCount: results.length, messages: results };

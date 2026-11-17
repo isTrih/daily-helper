@@ -1,3 +1,6 @@
+import { createA2CardActionHandler, routeReportCardActions } from "./a2-card-actions.ts";
+import { A2ReportService } from "./a2-report.ts";
+import { A2Base, A2Service } from "./a2-service.ts";
 import { Cron } from "croner";
 import { createSendDataCommandHandler } from "./bot-command.ts";
 import { createCardActionHandler } from "./card-actions.ts";
@@ -15,12 +18,22 @@ const reportService = new ReportService(xingtuClient, config.schedule.timezone, 
 const larkService = config.lark.configured
   ? new LarkService(config.lark.appId!, config.lark.appSecret!)
   : undefined;
+const a2Service = larkService ? new A2Service({
+  ...config.a2, appId: config.lark.appId!, appSecret: config.lark.appSecret!,
+}) : undefined;
+const a2Reports = larkService ? new A2ReportService(new A2Base(config.lark.appId!, config.lark.appSecret!, config.a2.wikiToken), larkService) : undefined;
+const a2Schedules = new ScheduleService(config.a2.schedulesFile, config.schedule.timezone, async schedule => {
+  if (!a2Reports || !schedule.request.a2GameCodes) throw new Error("A2 日报服务或游戏选择未配置");
+  await a2Reports.send(schedule.request.a2GameCodes, [schedule.chatId]);
+});
+await a2Schedules.initialize();
 const orchestrator = new ReportOrchestrator(
   reportService,
   larkService,
   config.schedule.timezone,
   config.projectColors,
   config.projectIcons,
+  a2Service ? () => a2Service.run() : undefined,
 );
 const scheduleService = new ScheduleService(
   config.schedule.storePath,
@@ -40,6 +53,9 @@ const server = startServer({
   ...(larkService ? { larkService } : {}),
   orchestrator,
   scheduleService,
+  ...(a2Service ? { a2Service } : {}),
+  ...(a2Reports ? { a2Reports } : {}),
+  a2Schedules,
 });
 const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, projectCodes, { isPrivateChat }) => {
   const latestPeriods = projectCodes ? await reportService.latestPeriods() : [];
@@ -71,14 +87,14 @@ let scheduledJob: Cron | undefined;
 if (larkService && config.lark.longConnectionEnabled) {
   larkService
     .startCardActionConnection(
-      createCardActionHandler(
+      routeReportCardActions(createCardActionHandler(
         reportService,
         config.schedule.timezone,
         config.projectColors,
         config.projectIcons,
         (messageId) => larkService.recallMessage(messageId),
         (messageId, card) => larkService.updateCard(messageId, card),
-      ),
+      ), createA2CardActionHandler(a2Reports, (messageId, card) => larkService.updateCard(messageId, card))),
       sendDataCommandHandler,
     )
     .catch((error) => console.error("[lark] 无法建立卡片回调长连接", error));
@@ -115,6 +131,7 @@ async function shutdown(signal: string) {
   console.info(`[app] 收到 ${signal}，正在停止服务`);
   scheduledJob?.stop();
   scheduleService.stop();
+  a2Schedules.stop();
   larkService?.close();
   server.stop(true);
   process.exit(0);
