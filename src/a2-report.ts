@@ -64,25 +64,44 @@ export function a2Footnote(state: A2ViewState): Record<string, unknown>[] {
   ];
 }
 export function a2SwitchControls(state: A2ViewState): Record<string, unknown>[] {
-  const button = (code: string, label: string) => ({
-    tag: "button", element_id: `a2_view_${code}`, type: state.selectedGame === code ? "primary" : "default", size: "small", width: "fill",
-    text: { tag: "plain_text", content: label },
-    behaviors: [{ type: "callback", value: { action: "a2_switch", game_codes: state.gameCodes, selected_game: code, report_date: state.reportDate, expires_at: state.expiresAt } }],
-  });
   const games = A2_REPORT_GAMES.filter(game => state.gameCodes.includes(game.code));
-  const result: Record<string, unknown>[] = [];
-  if (games.length > 1) result.push(button("overview", "整体概览"));
-  for (let i = 0; i < games.length; i += 2) {
-    result.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "8px", columns: games.slice(i, i + 2).map(game => ({ tag: "column", width: "weighted", weight: 1, elements: [button(game.code, game.name)] })) });
-  }
-  return result;
+  return [{ tag: "column_set", flex_mode: "flow", background_style: "grey", horizontal_spacing: "8px", columns: [
+    { tag: "column", width: "weighted", weight: 1, padding: "8px", elements: [{
+      tag: "select_static", element_id: "a2_game_picker", name: "a2_game_picker", type: "default", width: "fill",
+      placeholder: { tag: "plain_text", content: "切换游戏或整体概览" }, initial_option: state.selectedGame,
+      options: [...(games.length > 1 ? [{ text: { tag: "plain_text", content: "整体概览" }, value: "overview" }] : []), ...games.map(game => ({ text: { tag: "plain_text", content: game.name }, value: game.code }))],
+      behaviors: [{ type: "callback", value: { action: "a2_switch", game_codes: state.gameCodes, selected_game: state.selectedGame, report_date: state.reportDate, expires_at: state.expiresAt } }],
+    }] },
+  ] }];
+}
+const metricColumn = (label: string, value: string, weight = 1) => ({ tag: "column", width: "weighted", weight, elements: [markdown("<font color='grey'>" + label + "</font>\n" + value)] });
+function splitDelta(current: number, previous?: number) {
+  if (previous === undefined) return colorText("暂无对照", "grey");
+  const diff = current - previous;
+  const color = diff > 0 ? "red" : diff < 0 ? "green" : "grey";
+  const amount = (diff > 0 ? "+" : "") + wan(diff);
+  const percent = previous === 0 ? "基数为零" : (diff > 0 ? "+" : "") + (diff / previous * 100).toFixed(2) + "%";
+  return colorText(amount + "\n" + percent, color);
+}
+function compactDelta(label: string, current: number, previous?: number) {
+  if (previous === undefined) return colorText(label + " 暂无对照", "grey");
+  const diff = current - previous;
+  return colorText(label + " " + (diff > 0 ? "+" : "") + wan(diff), diff > 0 ? "red" : diff < 0 ? "green" : "grey");
 }
 export function buildA2Card(reports: A2GameReport[], state: A2ViewState = { gameCodes: reports.map(r => r.code), selectedGame: reports.length === 1 ? reports[0]!.code : "overview", reportDate: a2Dates().dates[0]!, expiresAt: new Date(Date.now() + 14 * 86400000).toISOString() }): CardJson {
   const single = reports.length === 1;
-  const elements: Record<string, unknown>[] = [];
+  const elements: Record<string, unknown>[] = [...a2SwitchControls(state)];
   if (single) {
     const r = reports[0]!;
-    elements.push(markdown(`${colorText("**" + wan(r.latest.A2) + "**", r.theme.token)}　较前日 ${coloredDelta(r.latest.A2, r.previous?.A2)}\n其他品牌 ${wan(r.latest.other_A2)}　对比占比 ${colorText("**" + r.share.text + "**", r.share.token)}\n较 7 日前 ${coloredDelta(r.latest.A2, r.week?.A2)}`));
+    elements.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "12px", columns: [
+      metricColumn("游戏 A2", colorText("**" + wan(r.latest.A2) + "**", r.theme.token)),
+      metricColumn("其他品牌 A2", "**" + wan(r.latest.other_A2) + "**"),
+      metricColumn("对比占比", colorText("**" + r.share.text + "**", r.share.token)),
+    ] });
+    elements.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "12px", columns: [
+      metricColumn("较前日", splitDelta(r.latest.A2, r.previous?.A2)),
+      metricColumn("较7日前", splitDelta(r.latest.A2, r.week?.A2)),
+    ] });
     elements.push({ tag: "chart", element_id: "a2_15_day_trend", height: "280px", preview: true,
       chart_spec: {
         type: "common", autoFit: true, color: ["#b8cbd9", r.theme.hex],
@@ -101,15 +120,19 @@ export function buildA2Card(reports: A2GameReport[], state: A2ViewState = { game
         ], legends: { visible: true, orient: "bottom" }, tooltip: { visible: true }, padding: { top: 12, right: 12, bottom: 12, left: 12 },
       } });
   } else {
+    const weights = [3, 3, 4, 2];
+    elements.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "4px", background_style: "grey", columns: ["游戏", "A2 / 其他品牌", "较前日 / 较7日", "占比"].map((label, index) => ({ tag: "column", width: "weighted", weight: weights[index], elements: [markdown("**" + label + "**")] })) });
     for (const r of reports) {
-      elements.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "8px", columns: [
-        { tag: "column", width: "weighted", weight: 1, elements: [markdown(`${colorText("**" + r.name + "**", r.theme.token)}\n<font color='grey'>${r.latest.date}${r.stale ? " · 待更新" : ""}</font>`)] },
-        { tag: "column", width: "weighted", weight: 2, elements: [markdown(`**${wan(r.latest.A2)}**　较前日 ${coloredDelta(r.latest.A2, r.previous?.A2)}\n较 7 日前 ${coloredDelta(r.latest.A2, r.week?.A2)} · 占比 ${colorText("**" + r.share.text + "**", r.share.token)}`)] },
-      ] });
+      const values = [
+        colorText("**" + r.name + "**", r.theme.token) + "\n" + colorText(r.latest.date + (r.stale ? " · 待更新" : ""), "grey"),
+        "**" + wan(r.latest.A2) + "**\n" + colorText(wan(r.latest.other_A2), "grey"),
+        compactDelta("日", r.latest.A2, r.previous?.A2) + "\n" + compactDelta("7日", r.latest.A2, r.week?.A2),
+        colorText("**" + r.share.text + "**", r.share.token),
+      ];
+      elements.push({ tag: "column_set", flex_mode: "none", horizontal_spacing: "4px", margin: "6px 0", columns: values.map((value, index) => ({ tag: "column", width: "weighted", weight: weights[index], vertical_align: "center", elements: [markdown(value)] })) });
     }
   }
   if (reports.some(r => r.stale)) elements.push(markdown("<font color='orange'>部分游戏数据尚未更新，以上已标明实际数据日期。</font>"));
-  elements.push(...a2SwitchControls(state));
   elements.push({
     tag: "button", element_id: "a2_dashboard", type: "primary", size: "small", width: "default",
     text: { tag: "plain_text", content: "看板及数据" },
@@ -148,11 +171,12 @@ export class A2ReportService {
     }
     return { cards: [buildA2Card(reports, { gameCodes: input.gameCodes, selectedGame, reportDate, expiresAt })], reports, dashboardUrl: A2_DASHBOARD_URL, viewState: { gameCodes: input.gameCodes, selectedGame, reportDate, expiresAt } };
   }
-  async send(codes: string[], chats: string[]) {
+  async send(codes: string[], chats: string[], initialView = codes.length === 1 ? codes[0]! : "overview") {
     if (!this.lark) throw new Error("未配置飞书应用，无法发送 A2 日报");
     const chatIds = [...new Set(chats.map(chat => chat.trim()).filter(Boolean))];
     if (!chatIds.length) throw new Error("请选择发送群聊");
-    a2ReportRequest.parse({ gameCodes: codes });
+    const allowed = a2ReportRequest.parse({ gameCodes: codes }).gameCodes;
+    if (initialView !== "overview" && !allowed.includes(initialView as never)) throw new Error("默认游戏不在发送范围内");
     const messages: Array<{ chatId: string; messageId: string }> = [];
     const pending = new Set<string>();
     try {
@@ -160,7 +184,7 @@ export class A2ReportService {
         const messageId = await this.lark.sendCard(chatId, buildA2LoadingCard());
         messages.push({ chatId, messageId }); pending.add(messageId);
       }
-      const { cards } = await this.preview(codes);
+      const { cards } = await this.view(codes, initialView);
       for (const { messageId } of messages) {
         await this.lark.updateCard(messageId, cards[0]!); pending.delete(messageId);
       }

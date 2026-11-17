@@ -21,11 +21,14 @@ export function createA2CardActionHandler(reports: Pick<A2ReportService, "view">
   return async event => {
     try {
       const action = actionSchema.parse(event.action?.value);
+      // select_static reports the newly chosen option separately from its value.
+      // Keep the value fallback for previously sent button-based cards.
+      const selectedGame = z.enum(["overview", "w", "rok", "samo", "pgame"]).parse(event.action?.option ?? action.selected_game);
       if (!reports) throw new Error("A2 日报服务未配置");
       if (Date.parse(action.expires_at) <= Date.now()) throw new Error("卡片已过互动有效期，请重新发送 A2 日报");
       if (action.report_date > a2Dates().dates[0]!) throw new Error("卡片数据日期无效");
-      if (action.selected_game !== "overview" && !action.game_codes.includes(action.selected_game)) throw new Error("游戏不在这张卡片的发送范围内");
-      const state: A2ViewState = { gameCodes: action.game_codes, selectedGame: action.selected_game, reportDate: action.report_date, expiresAt: action.expires_at };
+      if (selectedGame !== "overview" && !action.game_codes.includes(selectedGame)) throw new Error("游戏不在这张卡片的发送范围内");
+      const state: A2ViewState = { gameCodes: action.game_codes, selectedGame, reportDate: action.report_date, expiresAt: action.expires_at };
       const task = reports.view(state.gameCodes, state.selectedGame, state.reportDate, state.expiresAt);
       const messageId = event.context?.open_message_id ?? event.open_message_id;
       if (!updateCard || !messageId) return { card: { type: "raw", data: (await task).cards[0]! } };

@@ -9,7 +9,9 @@ test("总览切单游戏仍保留四游戏和返回总览，日期固定且默�
  const handler=createA2CardActionHandler(service);
  const response=await handler(action());expect(response.card).toBeDefined();const card=response.card!.data;
  expect((card.header as any).title.content).toContain("万龙觉醒");expect((card.config as any).enable_forward).toBe(true);expect((card.config as any).enable_forward_interaction).toBe(true);
- const buttons=callbacks(card);expect(buttons.map(v=>v.selected_game)).toEqual(["overview","w","rok","samo","pgame"]);
+ const buttons=callbacks(card);expect(buttons).toHaveLength(1);
+ const findPicker=(node:any):any=>node?.tag==="select_static"?node:Array.isArray(node)?node.map(findPicker).find(Boolean):node&&typeof node==="object"?Object.values(node).map(findPicker).find(Boolean):undefined;
+ const picker=findPicker(card);expect(picker.initial_option).toBe("samo");expect(picker.options.map((o:any)=>o.value)).toEqual(["overview","w","rok","samo","pgame"]);
  expect(buttons.every(v=>v.report_date==="2026-11-15"&&v.game_codes.length===4)).toBe(true);
  expect(JSON.stringify(card)).not.toContain("100.00万");expect(reads).toBe(1);
  const overview=await handler(action("overview"));expect((overview.card!.data.header as any).title.content).toContain("概览");expect(reads).toBe(4);
@@ -30,3 +32,5 @@ test("A2 回调和正常日报回调分流",async()=>{
  let project=0,a2=0;const router=routeReportCardActions(async()=>{project++;return{};},async()=>{a2++;return{};});
  await router(action());await router({action:{value:{action:"select_period"}}});expect(a2).toBe(1);expect(project).toBe(1);
 });
+
+test("下拉切换优先使用 action.option，同时兼容旧按钮值",async()=>{const service=new A2ReportService({readDaily:async()=>rows});const handler=createA2CardActionHandler(service);const event={...action("samo"),action:{...action("samo").action,option:"rok"}};const result=await handler(event);expect((result.card!.data.header as any).title.content).toContain("万国觉醒");expect(JSON.stringify(result.card)).toContain('"initial_option":"rok"');const bad={...event,action:{...event.action,option:"d1"}};expect((await handler(bad)).toast?.type).toBe("error");});

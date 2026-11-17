@@ -84,7 +84,7 @@ const sendDataCommandHandler = createSendDataCommandHandler(async (chatId, proje
 
 const a2CommandHandler = createA2CommandHandler(async chatId => {
   if (!a2Reports) throw new Error("A2 日报服务未配置");
-  const result = await a2Reports.send(A2_REPORT_GAMES.map(game => game.code), [chatId]);
+  const result = await a2Reports.send(A2_REPORT_GAMES.map(game => game.code), [chatId], "rok");
   console.info(`[lark] 私聊 A2 口令执行完成，共 ${result.messageCount} 条消息`);
 });
 

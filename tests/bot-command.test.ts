@@ -104,14 +104,14 @@ describe("A2 私聊口令",()=>{
   expect(await handler(message("发送数据",[],"p2p"))).toBe(false);
   expect(chats).toEqual(["oc_group_1"]);
  });
- test("口令通过标准A2服务发送四游戏概览，保留转发和切换",async()=>{
+ test("私聊口令默认选中万国觉醒，保留四游戏下拉范围和转发",async()=>{
   const {createA2CommandHandler}=await import("../src/bot-command.ts");const {A2ReportService,A2_REPORT_GAMES}=await import("../src/a2-report.ts");
   const cards:any[]=[];const initial:any[]=[];const targets:string[]=[];const names:string[]=[];
   const service=new A2ReportService({readDaily:async name=>{names.push(name);return[{date:"2026-01-01",A2:100000,other_A2:200000}];}},{sendCard:async(chat,card)=>{targets.push(chat);initial.push(card);return"message";},updateCard:async(id,card)=>{expect(id).toBe("message");cards.push(card);}});
   let done:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
-  const handler=createA2CommandHandler(async chat=>{await service.send(A2_REPORT_GAMES.map(g=>g.code),[chat]);done();});
+  const handler=createA2CommandHandler(async chat=>{await service.send(A2_REPORT_GAMES.map(g=>g.code),[chat],"rok");done();});
   await handler(message("a2",[],"p2p"));await finished;
-  expect(targets).toEqual(["oc_group_1"]);expect(names).toEqual(["战火勋章","万国觉醒","万龙觉醒","塔塔冒险队"]);
-  expect(initial[0].header.title.content).toContain("正在读取");expect(cards[0].header.title.content).toContain("游戏概览");expect(cards[0].config.enable_forward).toBe(true);expect(cards[0].config.enable_forward_interaction).toBe(true);expect(JSON.stringify(cards[0])).toContain('"action":"a2_switch"');
+  expect(targets).toEqual(["oc_group_1"]);expect(names).toEqual(["万国觉醒"]);
+  expect(initial[0].header.title.content).toContain("正在读取");expect(cards[0].header.title.content).toContain("万国觉醒");expect(JSON.stringify(cards[0])).toContain('"initial_option":"rok"');expect(JSON.stringify(cards[0])).toContain('"value":"overview"');expect(cards[0].config.enable_forward).toBe(true);expect(cards[0].config.enable_forward_interaction).toBe(true);expect(JSON.stringify(cards[0])).toContain('"action":"a2_switch"');
  });
 });
