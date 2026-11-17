@@ -21,7 +21,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const raw = await chrome.cookies.getAll({domain:'oceanengine.com'});
     const cookies = raw.map(c => ({name:c.name,value:c.value,domain:c.domain,path:c.path,secure:c.secure,httpOnly:c.httpOnly,expires:c.session ? -1 : c.expirationDate,sameSite:({strict:'Strict',lax:'Lax',no_restriction:'None'})[c.sameSite] || 'Lax'}));
     const response = await fetch(new URL('/api/a2/auth',message.origin),{method:'POST',redirect:'error',headers:{'Content-Type':'application/json','X-A2-Upload':'yuntu-session-v1'},body:JSON.stringify({requests,cookies}),signal:AbortSignal.timeout(30000)});
-    if (!response.ok) throw Error(`上传失败 HTTP ${response.status}`);
+    if (!response.ok) {
+      const failure = await response.json().catch(() => null);
+      const detail = typeof failure?.error === 'string' ? failure.error.slice(0, 160) : '请检查服务器地址并重新加载插件';
+      throw Error(`上传失败 HTTP ${response.status}：${detail}`);
+    }
     reply({ok:true, games:(await response.json()).games});
   })().catch(e => reply({error:e.message}));
   return true;

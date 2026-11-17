@@ -20,7 +20,9 @@ test("上传无需令牌但校验协议、严格结构和来源；管理状态�
    expect((await fetch(base+"/api/a2/auth",{method:"POST",headers,body:JSON.stringify(auth)})).status).toBe(200);
    const status=await (await fetch(base+"/api/a2/status",{headers:adminHeaders})).text();
    expect(status).toContain('"hasAuth":true'); expect(status).not.toContain("secret-fixture");
-   expect((await fetch(base+"/api/a2/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(auth)})).status).toBe(415);
+   expect((await fetch(base+"/api/a2/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(auth)})).status).toBe(200);
+   expect((await fetch(base+"/api/a2/auth",{method:"POST",headers:{...headers,"X-A2-Upload":"unknown-version"},body:JSON.stringify(auth)})).status).toBe(415);
+   expect((await fetch(base+"/api/a2/auth",{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(auth)})).status).toBe(415);
    expect((await fetch(base+"/api/a2/auth",{method:"POST",headers:{...headers,Origin:"https://evil.example"},body:JSON.stringify(auth)})).status).toBe(403);
    expect((await fetch(base+"/api/a2/auth",{method:"POST",headers,body:JSON.stringify({...auth,unexpected:true})})).status).toBe(400);
    expect((await fetch(base+"/api/a2/auth",{method:"POST",headers,body:"{"})).status).toBe(400);

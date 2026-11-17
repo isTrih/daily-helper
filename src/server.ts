@@ -51,7 +51,11 @@ export function startServer(args: {
           if (request.method !== "POST") return json({ error: "仅支持 POST" }, 405);
           const origin = request.headers.get("origin");
           if (origin && origin !== url.origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin) && !/^moz-extension:\/\/[0-9a-f-]+$/i.test(origin)) return json({ error: "上传来源无效" }, 403);
-          if (request.headers.get("x-a2-upload") !== "yuntu-session-v1" || !/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return json({ error: "上传协议或 Content-Type 无效，请更新插件" }, 415);
+          // Older extensions omit this optional protocol marker. The full body is
+          // still validated by authSchema; absence of a non-secret header is not an error.
+          const uploadProtocol = request.headers.get("x-a2-upload");
+          if (uploadProtocol !== null && uploadProtocol !== "yuntu-session-v1") return json({ error: "不支持的上传协议版本，请更新插件" }, 415);
+          if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return json({ error: "上传需要 Content-Type: application/json" }, 415);
           if (!args.a2Service) return json({ error: "A2 未启用" }, 503);
           const body = await request.text();
           if (body.length > 512000) return json({ error: "登录态过大" }, 413);
