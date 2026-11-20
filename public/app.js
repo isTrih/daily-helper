@@ -18,6 +18,7 @@ const projectList = document.querySelector("#projectList");
 
 const preview = document.querySelector("#preview");
 const previewButton = document.querySelector("#previewButton");
+const refreshReportButton = document.querySelector("#refreshReportButton");
 const sendButton = document.querySelector("#sendButton");
 const connectionState = document.querySelector("#connectionState");
 const toast = document.querySelector("#toast");
@@ -84,6 +85,7 @@ topicList.addEventListener("click", (event) => {
   updateSummary();
 });
 previewButton.addEventListener("click", () => runAction("preview"));
+refreshReportButton.addEventListener("click", () => runAction("refresh"));
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   void runAction("send");
@@ -260,25 +262,28 @@ function updateSummary() {
 }
 
 async function runAction(kind) {
+  if (sendButton.disabled) return;
   addTopicsFromInput();
   const request = collectRequest();
-  const recipients = validateRecipients();
+  const refresh = kind === "refresh";
+  const recipients = refresh ? [] : validateRecipients();
   if (!recipients) return;
   if (!request.periodIds.length) return showToast("请至少选择一个项目", true);
   if (kind === "send" && !recipients.length) return showToast("请至少选择或输入一个群聊或用户", true);
 
   setBusy(true);
+  if (refresh) refreshReportButton.textContent = "正在重新拉取…";
   try {
     const response = await fetch(kind === "send" ? "/api/reports/send" : "/api/reports/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...request, recipients, names: undefined, projectCount: undefined }),
+      body: JSON.stringify({ ...request, recipients, ...(refresh ? { refresh } : {}), names: undefined, projectCount: undefined }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "请求失败");
-    if (kind === "preview") {
+    if (kind !== "send") {
       renderPreview(data.cards);
-      showToast(`已生成 ${data.cards.length} 张卡片预览`);
+      showToast(refresh ? "已重新拉取数据，预览已更新" : `已生成 ${data.cards.length} 张卡片预览`);
     } else {
       showToast(`发送完成：${data.messageCount} 条消息`);
       preview.innerHTML = `<p>发送成功。共生成 ${data.cardCount} 张卡片，投递 ${data.messageCount} 条消息。</p>`;
@@ -286,6 +291,7 @@ async function runAction(kind) {
   } catch (error) {
     showToast(error.message || "操作失败", true);
   } finally {
+    refreshReportButton.textContent = "重新拉取数据";
     setBusy(false);
   }
 }
@@ -307,6 +313,7 @@ function renderPreview(cards) {
 
 function setBusy(busy) {
   previewButton.disabled = busy;
+  refreshReportButton.disabled = busy;
   sendButton.disabled = busy;
   document.querySelector("#refreshButton").disabled = busy;
   saveScheduleButton.disabled = busy;

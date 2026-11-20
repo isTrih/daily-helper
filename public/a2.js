@@ -7,12 +7,36 @@ const selectedGames = () => [...document.querySelectorAll('input[name="a2Game"]:
 const recipientPicker = new RecipientPicker($('a2Chats'));
 const selectedRecipients = () => recipientPicker.getSelection();
 function notice(text, error = false) { $('a2Notice').textContent = text; $('a2Notice').classList.toggle('a2-error', error); }
-function busy(value) { state.busy=value; for(const id of ['a2PreviewButton','a2SendButton','a2SaveSchedule','refreshA2']) $(id).disabled=value; $('a2SendButton').textContent=value?'正在处理…':'发送 A2 日报'; }
+function busy(value) { state.busy=value; for(const id of ['a2PreviewButton','a2RefreshReportButton','a2SendButton','a2SaveSchedule','refreshA2']) $(id).disabled=value; $('a2SendButton').textContent=value?'正在处理…':'发送 A2 日报'; }
 async function api(path, method='GET', body) { const r=await fetch('/api/a2/reports/'+path,{method,cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});const data=await r.json();if(!r.ok)throw Error(data.error||'操作失败，请重试');return data; }
 function choice(name,value,title,checked=true) {const label=document.createElement('label');label.className='choice';const input=document.createElement('input');input.type='checkbox';input.name=name;input.value=value;input.checked=checked;const text=document.createElement('strong');text.textContent=title;label.append(input,text);return label;}
 async function bootstrap() { busy(true);try {const data=await api('bootstrap');const hadSelection=state.games.length>0;const old=selectedGames();state.games=data.games;state.chats=data.chats;$('a2Games').replaceChildren(...data.games.map(g=>choice('a2Game',g.code,g.name,hadSelection?old.includes(g.code):true)));recipientPicker.setChats(data.chats,data.defaultChatId,data.chatsError);renderSchedules(data.schedules);notice('选择游戏后预览，或保存独立的 A2 每日计划。');}catch(e){notice(e.message,true);}finally{busy(false);} }
 function selection() {const games=selectedGames();if(!games.length)throw Error('请至少选择一款游戏');return games;}
-async function run(send=false) { try { const gameCodes=selection();const recipients=send?selectedRecipients():[];if(send&&!recipients.length)throw Error('请选择或输入群聊或用户');busy(true);notice(send?'正在发送 A2 日报…':'正在读取 A2 数据…');const data=await api(send?'send':'preview','POST',send?{gameCodes,recipients}:{gameCodes});if(send)notice(`A2 日报已发送，共 ${data.messageCount} 条消息`);else{renderReports(data.reports,data.dashboardUrl,data.reports,data.viewState);notice('已使用飞书实际数据生成预览。');}}catch(e){notice(e.message,true);}finally{busy(false);} }
+async function run(action = 'preview') {
+  if (state.busy) return;
+  try {
+    const gameCodes = selection();
+    const send = action === 'send';
+    const refresh = action === 'refresh';
+    const recipients = send ? selectedRecipients() : [];
+    if (send && !recipients.length) throw Error('请选择或输入群聊或用户');
+    busy(true);
+    if (refresh) $('a2RefreshReportButton').textContent = '正在重新拉取…';
+    notice(send ? '正在发送 A2 日报…' : refresh ? '正在重新拉取 A2 数据…' : '正在读取 A2 数据…');
+    const body = send ? { gameCodes, recipients } : { gameCodes, ...(refresh ? { refresh } : {}) };
+    const data = await api(send ? 'send' : 'preview', 'POST', body);
+    if (send) notice(`A2 日报已发送，共 ${data.messageCount} 条消息`);
+    else {
+      renderReports(data.reports, data.dashboardUrl, data.reports, data.viewState);
+      notice(refresh ? '已重新拉取 A2 数据，预览已更新。' : '已使用飞书实际数据生成预览。');
+    }
+  } catch (e) {
+    notice(e.message, true);
+  } finally {
+    $('a2RefreshReportButton').textContent = '重新拉取数据';
+    busy(false);
+  }
+}
 const text=(tag,content,cls)=>{const el=document.createElement(tag);el.textContent=content;if(cls)el.className=cls;return el;};
 function renderReports(reports, dashboardUrl="https://lilithgames.feishu.cn/wiki/V1vYwn6OxiayQlkajqWcSVLNnpc?table=wbpaxcxrwV", scopeReports=reports, viewState={}) {
   const host=$('a2Preview');host.replaceChildren();
@@ -45,4 +69,9 @@ async function reloadSchedules(){renderSchedules((await api('schedules')).schedu
 async function scheduleAction(action,schedule){if(action==='edit'){state.editing=schedule.id;$('a2ScheduleName').value=schedule.name;$('a2ScheduleTime').value=schedule.time;$('a2ScheduleEnabled').checked=schedule.enabled;for(const input of document.querySelectorAll('[name="a2Game"]'))input.checked=schedule.request.a2GameCodes.includes(input.value);recipientPicker.setSelection(savedRecipients(schedule));$('a2SaveSchedule').textContent='更新 A2 计划';$('a2CancelEdit').hidden=false;notice('正在编辑 A2 计划');return;}if(action==='delete'&&!confirm(`删除“${schedule.name}”？`))return;busy(true);try{await api('schedules/'+schedule.id,action==='delete'?'DELETE':'PATCH',action==='delete'?undefined:{enabled:!schedule.enabled});await reloadSchedules();notice('A2 计划已更新');}catch(e){notice(e.message,true);}finally{busy(false);}}
 function cancelEdit(){state.editing=null;$('a2ScheduleName').value='';$('a2SaveSchedule').textContent='保存 A2 计划';$('a2CancelEdit').hidden=true;}
 $('a2SaveSchedule').onclick=async()=>{try{const gameCodes=selection();const recipients=selectedRecipients();if(!recipients.length)throw Error('请选择至少一个群聊或用户');busy(true);await api('schedules'+(state.editing?'/'+state.editing:''),state.editing?'PUT':'POST',{gameCodes,name:$('a2ScheduleName').value.trim()||'A2 每日概览',recipients,time:$('a2ScheduleTime').value,enabled:$('a2ScheduleEnabled').checked});await reloadSchedules();cancelEdit();notice('A2 每日计划已保存');}catch(e){notice(e.message,true);}finally{busy(false);}};
-$('a2CancelEdit').onclick=cancelEdit;$('refreshA2').onclick=bootstrap;$('a2PreviewButton').onclick=()=>run();$('a2Form').onsubmit=e=>{e.preventDefault();run(true);};bootstrap();
+$('a2CancelEdit').onclick=cancelEdit;
+$('refreshA2').onclick=bootstrap;
+$('a2PreviewButton').onclick=()=>run();
+$('a2RefreshReportButton').onclick=()=>run('refresh');
+$('a2Form').onsubmit=e=>{e.preventDefault();run('send');};
+bootstrap();

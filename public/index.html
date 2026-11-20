@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <title>项目快报控制台</title>
-    <link rel="stylesheet" href="/styles.css?v=25" />
+    <link rel="stylesheet" href="/styles.css?v=26" />
   </head>
   <body>
     <div class="ambient ambient-one"></div>
@@ -129,6 +129,7 @@
 
           <div class="actions">
             <button type="button" class="button secondary" id="previewButton">预览数据</button>
+            <button type="button" class="button secondary report-refresh" id="refreshReportButton">重新拉取数据</button>
             <button type="submit" class="button primary" id="sendButton"><span>立即发送日报</span><b>↗</b></button>
           </div>
           <p class="fine-print">“立即发送”会真实调用飞书消息接口；每日计划可在下方按群聊或用户配置和管理。</p>
@@ -176,6 +177,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <noscript>此页面需要启用 JavaScript 才能配置和发送日报。</noscript>
-    <script type="module" src="/app.js?v=26"></script>
+    <script type="module" src="/app.js?v=27"></script>
   </body>
 </html>

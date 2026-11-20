@@ -52,6 +52,7 @@ export class ReportService {
     includeTrend = false,
     reportDate = dateInTimezone(this.timezone),
     topicKeyword?: string,
+    refresh = false,
   ): Promise<PeriodReport[]> {
     if (!isIsoDate(reportDate)) throw new Error("日报日期无效");
     const metadata = await this.getMetadata();
@@ -70,6 +71,7 @@ export class ReportService {
         includeTrend,
         reportDate,
         topicKeyword,
+        refresh,
       )),
     );
     return reports.sort((a, b) => this.compareProjects(a.period.projectId, b.period.projectId));
@@ -82,11 +84,12 @@ export class ReportService {
     includeTrend: boolean,
     reportDate: string,
     topicKeyword?: string,
+    refresh = false,
   ): Promise<PeriodReport> {
     const normalizedTopic = topicKeyword ? normalizeTopicKeyword(topicKeyword) : "";
     const cacheKey = `${period.activityPeriodId}:${rankingMode}:${includeTrend ? "trend" : "plain"}:${reportDate}:${normalizedTopic.toLocaleLowerCase("zh-CN")}`;
     const cached = this.reportCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (!refresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
     const today = reportDate;
     const yesterday = previousIsoDate(today);

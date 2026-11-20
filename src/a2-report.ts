@@ -156,16 +156,16 @@ export function buildA2LoadingCard(failed = false): CardJson {
 export class A2ReportService {
   private cache = new Map<string, { at: number; rows: A2Point[] }>();
   constructor(private readonly source: Pick<A2Base, "readDaily">, private readonly lark?: Pick<LarkService, "sendCard" | "updateCard">) {}
-  async preview(codes: string[]) {
-    return this.view(codes, codes.length === 1 ? codes[0]! : "overview");
+  async preview(codes: string[], refresh = false) {
+    return this.view(codes, codes.length === 1 ? codes[0]! : "overview", undefined, undefined, refresh);
   }
-  async view(codes: string[], selectedGame: string, reportDate = a2Dates().dates[0]!, expiresAt = new Date(Date.now() + 14 * 86400000).toISOString()) {
+  async view(codes: string[], selectedGame: string, reportDate = a2Dates().dates[0]!, expiresAt = new Date(Date.now() + 14 * 86400000).toISOString(), refresh = false) {
     const input = a2ReportRequest.parse({ gameCodes: codes });
     if (selectedGame !== "overview" && !input.gameCodes.includes(selectedGame as never)) throw new Error("游戏不在这张卡片的发送范围内");
     const reports: A2GameReport[] = [];
     for (const game of A2_REPORT_GAMES.filter(game => input.gameCodes.includes(game.code as never) && (selectedGame === "overview" || game.code === selectedGame))) {
       let cached = this.cache.get(game.code);
-      if (!cached || Date.now() - cached.at > 30000) {
+      if (refresh || !cached || Date.now() - cached.at > 30000) {
         cached = { at: Date.now(), rows: await this.source.readDaily(game.name) }; this.cache.set(game.code, cached);
       }
       reports.push(summarizeA2(game.code, game.name, cached.rows, new Date(), reportDate));

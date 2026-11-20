@@ -82,8 +82,8 @@ export function startServer(args: {
             if (!args.a2Reports) return json({ error: "A2 日报未配置飞书应用" }, 503);
             server.timeout(request, 0);
             if (url.pathname.endsWith("/preview")) {
-              const input = a2ReportRequest.parse(await readJson(request));
-              return json(await args.a2Reports.preview(input.gameCodes));
+              const input = a2ReportRequest.extend({ refresh: z.boolean().optional() }).parse(await readJson(request));
+              return json(await args.a2Reports.preview(input.gameCodes, input.refresh));
             }
             const input = a2ReportRequest.extend({ chatIds: z.array(z.string().trim().min(1).max(128)).min(1).max(500).optional(), recipients: recipientsSchema.optional() }).refine(value => !!value.recipients?.length || !!value.chatIds?.length).parse(await readJson(request));
             return json(await args.a2Reports.send(input.gameCodes, input.recipients ?? input.chatIds ?? []));
@@ -183,8 +183,9 @@ export function startServer(args: {
         }
 
         if (request.method === "POST" && url.pathname === "/api/reports/preview") {
-          const input = reportRequestSchema.parse(await readJson(request));
-          const cards = await orchestrator.createCards(input);
+          const { refresh, ...input } = reportRequestSchema.extend({ refresh: z.boolean().optional() }).parse(await readJson(request));
+          if (refresh) server.timeout(request, 0);
+          const cards = await orchestrator.createCards(input, refresh);
           return json({ cards });
         }
 
@@ -227,7 +228,7 @@ function staticFile(name: "index.html" | "a2.html" | "a2.js" | "app.js" | "recip
   return new Response(file, {
     headers: {
       "content-type": type,
-      "cache-control": name === "index.html" ? "no-cache" : "public, max-age=300",
+      "cache-control": name.endsWith(".html") ? "no-cache" : "public, max-age=300",
       "x-content-type-options": "nosniff",
     },
   });

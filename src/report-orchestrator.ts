@@ -33,8 +33,8 @@ export class ReportOrchestrator {
     private readonly afterFirstDelivery?: () => Promise<unknown>,
   ) {}
 
-  async createCards(request: ReportRequest): Promise<CardJson[]> {
-    const allPeriods = await this.reports.listPeriods();
+  async createCards(request: ReportRequest, refresh = false): Promise<CardJson[]> {
+    const allPeriods = await this.reports.listPeriods(refresh);
     const requestedIds = request.periodIds.length > 0
       ? [...new Set(request.periodIds)]
       : (await this.reports.latestPeriods(request.projectIds)).map((period) => period.activityPeriodId);
@@ -72,6 +72,7 @@ export class ReportOrchestrator {
           showTrend && visiblePeriodIds.length === 1,
           reportDate,
           topicKeyword,
+          refresh,
         );
         return buildReportCard({
           reports: periodReports,
@@ -103,6 +104,7 @@ export class ReportOrchestrator {
         showTrend,
         reportDate,
         topicKeyword,
+        refresh,
       ),
     })));
     return reportsByTopic.flatMap(({ topicKeyword, reports }) => reports.map((report) =>

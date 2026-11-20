@@ -152,7 +152,7 @@ input[type="text"]:focus, input[type="time"]:focus, select:focus { border-color:
 .summary-date { color: var(--lime); font: italic 20px Georgia, serif; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 22px 0 18px; }
 .summary-grid span, .summary-grid strong { display: block; }
-.summary-grid span { color: rgba(255,255,255,.6); font-size: 10px; letter-spacing: .12em; }
+.summary-grid span { color: rgba(255,255,255,.75); font-size: 12px; letter-spacing: .12em; }
 .summary-grid strong { font: 500 31px Georgia, serif; margin-top: 4px; }
 .selected-summary { border-top: 1px solid rgba(255,255,255,.16); padding-top: 16px; color: rgba(255,255,255,.75); font-size: 12px; line-height: 1.7; }
 .preview { min-height: 92px; margin: 20px 0; border: 1px dashed #c6d0c9; border-radius: 15px; padding: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -164,9 +164,10 @@ input[type="text"]:focus, input[type="time"]:focus, select:focus { border-color:
 .button { border: 0; border-radius: 13px; padding: 13px 16px; font: 750 14px inherit; cursor: pointer; transition: .18s ease; }
 .button:disabled { opacity: .55; cursor: wait; }
 .button.secondary { color: var(--green); background: #eaf0eb; }
+.report-refresh { min-height: 44px; }
 .button.primary { color: var(--ink); background: var(--lime); display: flex; align-items: center; justify-content: space-between; }
 .button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 9px 20px rgba(26,55,40,.12); }
-.fine-print { color: var(--muted); font-size: 10px; line-height: 1.55; margin: 14px 2px 0; }
+.fine-print { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 14px 2px 0; }
 
 .schedule-center { grid-column: 1 / -1; padding: clamp(24px, 4vw, 40px); }
 .schedule-intro { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
