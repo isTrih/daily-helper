@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { chromium, type BrowserContext } from "playwright-core";
+import { chromium, type BrowserContext, type Page } from "playwright-core";
 import { z } from "zod";
 
 export const A2_GAMES = [
@@ -42,8 +42,22 @@ export function browserCookies(cookies: Auth["cookies"]): Auth["cookies"] {
 // Only fixed diagnostics and numeric upstream status codes should leave the collector.
 export class A2CollectionError extends Error {}
 
+function pageInterruption(error: unknown) {
+  if (!(error instanceof Error)) return undefined;
+  if (/page crashed/i.test(error.message)) return "云图采集页面崩溃";
+  if (error.name === "TargetClosedError" || /Target page, context or browser has been closed/i.test(error.message)) {
+    return "云图采集页面或浏览器连接已关闭";
+  }
+  if (/Execution context was destroyed|Cannot find context with specified id|Frame was detached/i.test(error.message)) {
+    return "云图采集页面在请求期间跳转或重载";
+  }
+}
+
 function collectionError(error: unknown, fallback: string): string {
+  if (error instanceof A2CollectionError) return error.message;
   const message = error instanceof Error ? error.message : "";
+  const interrupted = pageInterruption(error);
+  if (interrupted) return interrupted;
   const feishu = /飞书 A2 操作失败 \((\d+)\)/.exec(message);
   if (feishu) return feishu[1] === "99991672"
     ? "飞书应用缺少接口权限（99991672），请检查 Wiki 与多维表格权限"
@@ -57,6 +71,9 @@ function collectionError(error: unknown, fallback: string): string {
   if (httpStatus?.[1] === "401") return "云图登录未恢复（HTTP 401），请重新登录并上传登录态";
   if (httpStatus) return `云图 HTTP 请求失败（${httpStatus[1]}）`;
   if (message.includes("云图响应不是有效 JSON")) return "云图响应不是有效 JSON";
+  const networkCode = /\bnet::(ERR_[A-Z_]+)\b/.exec(message);
+  if (networkCode) return `云图网络请求失败（${networkCode[1]}）`;
+  if (/Failed to fetch|NetworkError when attempting to fetch|Load failed/i.test(message)) return "云图网络请求失败（浏览器未收到响应）";
   if (/\b(?:TimeoutError|AbortError)\b|Timeout \d+ms exceeded/i.test(message)) return `${fallback}（超时）`;
   return fallback;
 }
@@ -67,7 +84,8 @@ export function a2Dates(now = new Date()) {
 }
 export function parseA2(payload: any): { A2: number; other_A2: number } {
   if (payload?.status !== undefined && payload.status !== 0 && payload.status !== "success") throw new Error("云图返回错误，请重新上传登录态");
-  const row = payload?.data?.profile?.find((p: any) => p.title === "a2");
+  const profile = payload?.data?.profile;
+  const row = Array.isArray(profile) ? profile.find(p => p?.title === "a2") : undefined;
   const integer = (value: unknown) => {
     if (!(typeof value === "number" || typeof value === "string" && /^\d+$/.test(value))) throw new Error("云图缺少有效 A2 数值");
     const n = Number(value);
@@ -75,6 +93,36 @@ export function parseA2(payload: any): { A2: number; other_A2: number } {
     return n;
   };
   return { A2: integer(row?.cover_num), other_A2: integer(row?.count_average) };
+}
+
+async function closeCollectionPage(page: Page | undefined) {
+  try { await page?.close(); }
+  catch { console.warn("[a2] 无法关闭采集页面，采集浏览器将在本轮结束后关闭"); }
+}
+
+async function openCollectionPage(context: BrowserContext, game: typeof A2_GAMES[number]) {
+  console.debug(`[a2] ${game.name} 正在打开云图人群资产页面`);
+  const page = await context.newPage();
+  try {
+    await page.goto(`https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution?aadvid=${game.aid}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    // Let the cloud page initialize its own request middleware.
+    await page.waitForTimeout(3000);
+    if (new URL(page.url()).pathname.startsWith("/account/login")) throw new A2CollectionError("云图登录未恢复，请重新上传登录态");
+    return page;
+  } catch (error) {
+    await closeCollectionPage(page);
+    throw error;
+  }
+}
+
+async function readCloudA2(page: Page, url: string, headers: Record<string, string>) {
+  const payload = await page.evaluate(async ({url, headers}) => {
+    const response = await fetch(url, { headers, credentials: "include", signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error(`云图 HTTP 请求失败（${response.status}）`);
+    try { return await response.json(); }
+    catch { throw new Error("云图响应不是有效 JSON"); }
+  }, {url, headers});
+  return parseA2(payload);
 }
 export async function atomicJson(path: string, value: unknown) {
   await mkdir(dirname(path), { recursive: true });
@@ -138,13 +186,12 @@ export class A2Service {
     const errors: string[] = [];
     let written = 0;
     let skipped = 0;
-    let context: BrowserContext | undefined;
     let browserFailure = "无法启动采集浏览器，请检查 CHROMIUM_PATH";
     try {
       const browser = await chromium.launch({ executablePath: this.options.executablePath, headless: true, args: ["--disable-dev-shm-usage", ...(process.env.CHROMIUM_NO_SANDBOX === "true" ? ["--no-sandbox"] : [])] });
       try {
         browserFailure = "无法初始化采集浏览器或载入登录态，请重新上传登录态后再试";
-        context = await browser.newContext();
+        const context = await browser.newContext();
         await context.addCookies(browserCookies(auth.cookies));
         console.debug(`[a2] 采集浏览器已就绪，已读取 ${auth.requests.length} 款游戏的请求模板`);
         const sink = new A2Base(this.options.appId, this.options.appSecret, this.options.wikiToken);
@@ -154,65 +201,67 @@ export class A2Service {
             console.debug(`[a2] ${game.name} 目标日期已写入，跳过`);
             continue;
           }
-          let failure = "打开云图人群资产页面失败";
+          let failure = "读取云图 A2 数据失败";
           let activeDate: string | undefined;
+          let page: Page | undefined;
           try {
             const template = auth.requests.find(r => new URL(r.url).searchParams.get("aadvid") === game.aid);
             if (!template) throw new Error("缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
-            console.debug(`[a2] ${game.name} 正在打开云图人群资产页面`);
-            const page = await context.newPage();
-            try {
-              await page.goto(`https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution?aadvid=${game.aid}`, { waitUntil: "domcontentloaded", timeout: 45000 });
-              // The original site loads its own request/signing middleware; never reuse stale signatures.
-              await page.waitForTimeout(3000);
-              if (new URL(page.url()).pathname.startsWith("/account/login")) throw new Error("云图登录未恢复，请重新上传登录态");
-              for (const date of dates) {
-                const key = `${game.code}:${date}`;
-                if (state.day === day && state.done?.includes(key)) {
-                  skipped++;
-                  console.debug(`[a2] ${game.name} ${date} 已写入，跳过`);
-                  continue;
-                }
-                activeDate = date;
-                failure = "读取云图 A2 数据失败";
-                console.debug(`[a2] ${game.name} ${date} 正在读取云图 A2 数据`);
-                const u = new URL(template.url);
-                u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
-                for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
-                if (!u.searchParams.get("brand_id")) throw new Error("捕获请求缺少 brand_id");
-                u.searchParams.set("date", date!.replaceAll("-", ""));
-                let values: ReturnType<typeof parseA2> | undefined;
-                for (let attempt = 0; attempt < 3; attempt++) {
-                  try {
-                    const payload = await page.evaluate(async ({url, headers}: {url: string; headers: Record<string, string>}) => {
-                      const response = await fetch(url, { headers, credentials: "include", signal: AbortSignal.timeout(30000) });
-                      if (!response.ok) throw new Error(`云图 HTTP 请求失败（${response.status}）`);
-                      try { return await response.json(); }
-                      catch { throw new Error("云图响应不是有效 JSON"); }
-                    }, {url: u.href, headers: template.headers});
-                    values = parseA2(payload); break;
-                  } catch (error) {
-                    if (attempt === 2) throw error;
-                    console.warn(`[a2] ${game.name} ${date} 第 ${attempt + 1}/3 次读取失败：${collectionError(error, failure)}，即将重试`);
-                    await page.waitForTimeout(1000 * (attempt + 1));
-                  }
-                }
-                if (!values) throw new Error("云图缺少有效 A2 数值");
-                console.debug(`[a2] ${game.name} ${date} 云图读取成功，正在写入飞书多维表`);
-                failure = "飞书多维表写入失败";
-                await sink.upsert(game.name, date!, values);
-                if (state.day !== day) { state.day = day; state.done = []; }
-                state.done ??= []; state.done.push(key);
-                failure = "保存采集进度失败";
-                await atomicJson(path, state);
-                written++;
-                console.info(`[a2] ${game.name} ${date} 飞书多维表写入成功`);
+            for (const date of dates) {
+              const key = `${game.code}:${date}`;
+              if (state.day === day && state.done?.includes(key)) {
+                skipped++;
+                console.debug(`[a2] ${game.name} ${date} 已写入，跳过`);
+                continue;
               }
-            } finally { await page.close(); }
+              activeDate = date;
+              failure = "读取云图 A2 数据失败";
+              const u = new URL(template.url);
+              u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
+              for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
+              if (!u.searchParams.get("brand_id")) throw new Error("捕获请求缺少 brand_id");
+              u.searchParams.set("date", date!.replaceAll("-", ""));
+              let values: ReturnType<typeof parseA2> | undefined;
+              let reason = failure;
+              for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                  page ??= await openCollectionPage(context, game);
+                  console.debug(`[a2] ${game.name} ${date} 正在读取云图 A2 数据（第 ${attempt}/3 次）`);
+                  values = await readCloudA2(page, u.href, template.headers);
+                  break;
+                } catch (error) {
+                  reason = collectionError(error, page ? failure : "打开云图人群资产页面失败");
+                  if (page && pageInterruption(error)) {
+                    await closeCollectionPage(page);
+                    page = undefined;
+                  }
+                  if (attempt === 3 || reason.startsWith("云图登录未恢复")) break;
+                  console.warn(`[a2] ${game.name} ${date} 第 ${attempt}/3 次读取失败：${reason}，即将重试`);
+                  await Bun.sleep(1000 * attempt);
+                }
+              }
+              if (!values) {
+                errors.push(`${game.name} ${date}：${reason}`);
+                console.error(`[a2] ${game.name} ${date}：${reason}`);
+                if (reason.startsWith("云图登录未恢复")) break;
+                continue;
+              }
+              console.debug(`[a2] ${game.name} ${date} 云图读取成功，正在写入飞书多维表`);
+              failure = "飞书多维表写入失败";
+              await sink.upsert(game.name, date!, values);
+              if (state.day !== day) { state.day = day; state.done = []; }
+              state.done ??= []; state.done.push(key);
+              failure = "保存采集进度失败";
+              await atomicJson(path, state);
+              written++;
+              console.info(`[a2] ${game.name} ${date} 飞书多维表写入成功`);
+            }
           } catch (error) {
             const reason = collectionError(error, failure);
             errors.push(`${game.name}：${reason}`);
             console.error(`[a2] ${game.name}${activeDate ? ` ${activeDate}` : ""}：${reason}`);
+          } finally {
+            await closeCollectionPage(page);
           }
         }
         browserFailure = "关闭采集浏览器失败";

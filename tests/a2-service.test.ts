@@ -83,6 +83,49 @@ test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () =
     await rm(dir, { recursive: true, force: true });
   }
 });
+test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏的另一天", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "a2-browser-recovery-"));
+  const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
+  const writes: string[] = [];
+  let pageCount = 0;
+  let firstDateAttempts = 0;
+  const launch = spyOn(chromium, "launch").mockResolvedValue({
+    newContext: async () => ({ addCookies: async () => {}, newPage: async () => {
+      const pageNumber = ++pageCount;
+      let closed = false;
+      return {
+        url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
+        goto: async () => {}, isClosed: () => closed,
+        waitForTimeout: async () => { if (closed) throw Error("Target page, context or browser has been closed"); },
+        close: async () => { closed = true; },
+        evaluate: async (_fn: unknown, request: {url: string}) => {
+          if (new URL(request.url).searchParams.get("date") !== "20261121") return response;
+          firstDateAttempts++;
+          if (pageNumber === 1) {
+            closed = true;
+            throw Error("Target page, context or browser has been closed");
+          }
+          throw Error("page.evaluate: TypeError: Failed to fetch");
+        },
+      };
+    }}), close: async () => {},
+  } as never);
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (_name, date) => { writes.push(date); });
+  try {
+    const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" });
+    await service.upload({ ...auth, requests: auth.requests.slice(0, 1) });
+    await expect(service.run(new Date("2026-11-23T11:00:00Z"))).rejects.toThrow();
+    expect(pageCount).toBe(2);
+    expect(firstDateAttempts).toBe(3);
+    expect(writes).toEqual(["2026-11-20"]);
+    expect((await service.status()).errors[0]).toContain("云图网络请求失败");
+  } finally {
+    upsert.mockRestore();
+    launch.mockRestore();
+    sleep.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", async () => {
   const calls: Array<{path:string,method:string,body:any}> = [];
   let wikiCalls = 0;
