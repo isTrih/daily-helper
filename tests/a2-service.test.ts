@@ -50,16 +50,38 @@ test("部分失败只重试未完成游戏，缺登录态记录可查看状态",
   const dir = await mkdtemp(join(tmpdir(), "a2-retry-"));
   const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async()=>response})}),close:async()=>{} } as never);
   let fail = true; let count = 0;
-  const upsert = spyOn(A2Base.prototype,"upsert").mockImplementation(async name => { if(fail && name === "万龙觉醒") throw Error("fixture"); count++; });
+  const upsert = spyOn(A2Base.prototype,"upsert").mockImplementation(async name => { if(fail && name === "万龙觉醒") throw Error("sensitive-fixture"); count++; });
   try {
     const service = new A2Service({token:"test",dir,appId:"test",appSecret:"test",wikiToken:"test",executablePath:"test"});
     const now = new Date("2026-11-16T01:00:00Z");
     await expect(service.run(now)).rejects.toThrow("缺少登录态");
     expect((await service.status()).errors).toHaveLength(1);
-    await service.upload(auth); await expect(service.run(now)).rejects.toThrow(); expect(count).toBe(8);
+    await service.upload(auth);
+    await expect(service.run(now)).rejects.toThrow("万龙觉醒：飞书多维表写入失败");
+    expect((await service.status()).errors).toEqual(["万龙觉醒：飞书多维表写入失败"]);
+    expect(count).toBe(8);
     fail=false; await service.run(now); expect(count).toBe(10);
     expect((await service.status()).completedDay).toBe("2026-11-16");
   } finally {launch.mockRestore();upsert.mockRestore();await rm(dir,{recursive:true,force:true});}
+});
+test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "a2-auth-status-"));
+  const launch = spyOn(chromium, "launch").mockResolvedValue({
+    newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
+      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
+      evaluate: async () => { throw new Error("page.evaluate: 云图 HTTP 请求失败（401）"); },
+    }) }), close: async () => {},
+  } as never);
+  try {
+    const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" });
+    await service.upload({ ...auth, requests: auth.requests.slice(0, 1) });
+    await expect(service.run(new Date("2026-11-22T11:00:00Z"))).rejects.toThrow("云图登录未恢复（HTTP 401）");
+    expect((await service.status()).errors).toContain("小冰冰传奇：缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
+  } finally {
+    launch.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", async () => {
   const calls: Array<{path:string,method:string,body:any}> = [];

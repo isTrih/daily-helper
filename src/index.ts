@@ -1,6 +1,7 @@
 import { createA2CardActionHandler, routeReportCardActions } from "./a2-card-actions.ts";
 import { A2_REPORT_GAMES, A2ReportService } from "./a2-report.ts";
 import { A2Base, A2Service } from "./a2-service.ts";
+import { installApplicationLogger } from "./application-log.ts";
 import { Cron } from "croner";
 import { createA2CommandHandler, createSendDataCommandHandler } from "./bot-command.ts";
 import { createCardActionHandler } from "./card-actions.ts";
@@ -14,6 +15,7 @@ import { startServer } from "./server.ts";
 import { XingtuClient } from "./xingtu-client.ts";
 
 const config = readConfig();
+const stopLogging = installApplicationLogger("data/logs", [config.xingtu.token, config.lark.appSecret, config.a2.token]);
 const xingtuClient = new XingtuClient(config.xingtu.baseUrl, config.xingtu.token);
 const reportService = new ReportService(xingtuClient, config.schedule.timezone, 45_000, config.projectOrder);
 const larkService = config.lark.configured
@@ -144,6 +146,7 @@ async function shutdown(signal: string) {
   a2Schedules.stop();
   larkService?.close();
   server.stop(true);
+  stopLogging();
   process.exit(0);
 }
 

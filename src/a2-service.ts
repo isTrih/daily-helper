@@ -39,14 +39,26 @@ export function browserCookies(cookies: Auth["cookies"]): Auth["cookies"] {
   }
   return result;
 }
-function collectionError(error: unknown): string {
+// Only fixed diagnostics and numeric upstream status codes should leave the collector.
+export class A2CollectionError extends Error {}
+
+function collectionError(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : "";
   const feishu = /飞书 A2 操作失败 \((\d+)\)/.exec(message);
   if (feishu) return feishu[1] === "99991672"
     ? "飞书应用缺少接口权限（99991672），请检查 Wiki 与多维表格权限"
     : `飞书接口错误（${feishu[1]}）`;
-  if (message === "云图登录未恢复，请重新上传登录态" || message === "云图缺少有效 A2 数值") return message;
-  return "请检查登录态、云图权限和飞书应用权限";
+  if (message === "缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传" ||
+      message === "云图登录未恢复，请重新上传登录态" ||
+      message === "云图缺少有效 A2 数值" ||
+      message === "云图返回错误，请重新上传登录态" ||
+      message === "A2 超出整数范围") return message;
+  const httpStatus = /云图 HTTP 请求失败（(\d{3})）/.exec(message);
+  if (httpStatus?.[1] === "401") return "云图登录未恢复（HTTP 401），请重新登录并上传登录态";
+  if (httpStatus) return `云图 HTTP 请求失败（${httpStatus[1]}）`;
+  if (message.includes("云图响应不是有效 JSON")) return "云图响应不是有效 JSON";
+  if (/\b(?:TimeoutError|AbortError)\b|Timeout \d+ms exceeded/i.test(message)) return `${fallback}（超时）`;
+  return fallback;
 }
 export function a2Dates(now = new Date()) {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -88,6 +100,7 @@ export class A2Service {
       const aids = [...new Set(auth.requests.map(r => new URL(r.url).searchParams.get("aadvid")))];
       if (aids.some(aid => !A2_GAMES.some(game => game.aid === aid))) throw new Error("登录态包含未配置游戏");
       await atomicJson(`${this.options.dir}/auth.json`, auth);
+      console.info(`[a2] 登录态上传成功，覆盖 ${aids.length}/${A2_GAMES.length} 款游戏`);
       return { games: aids, uploadedAt: new Date().toISOString() };
     });
   }
@@ -106,29 +119,47 @@ export class A2Service {
   run(now = new Date()) { return this.serial(() => this.collect(now)); }
   private async collect(now: Date) {
     const { day, dates } = a2Dates(now);
+    const started = performance.now();
     const path = `${this.options.dir}/state.json`;
     const state = await load(path);
-    if (state.completedDay === day) return;
+    if (state.completedDay === day) {
+      console.debug(`[a2] ${day} 已完成采集，跳过本次触发`);
+      return;
+    }
+    console.info(`[a2] 开始采集，运行日期 ${day}，目标数据日期 ${dates.join("、")}`);
     const parsedAuth = authSchema.safeParse(await load(`${this.options.dir}/auth.json`));
     if (!parsedAuth.success) {
       state.lastRunAt = now.toISOString(); state.errors = ["缺少登录态，请通过插件上传"];
       await atomicJson(path, state);
-      throw new Error(state.errors[0]);
+      console.error(`[a2] ${state.errors[0]}`);
+      throw new A2CollectionError(state.errors[0]);
     }
     const auth = parsedAuth.data;
     const errors: string[] = [];
+    let written = 0;
+    let skipped = 0;
     let context: BrowserContext | undefined;
+    let browserFailure = "无法启动采集浏览器，请检查 CHROMIUM_PATH";
     try {
       const browser = await chromium.launch({ executablePath: this.options.executablePath, headless: true, args: ["--disable-dev-shm-usage", ...(process.env.CHROMIUM_NO_SANDBOX === "true" ? ["--no-sandbox"] : [])] });
       try {
+        browserFailure = "无法初始化采集浏览器或载入登录态，请重新上传登录态后再试";
         context = await browser.newContext();
         await context.addCookies(browserCookies(auth.cookies));
+        console.debug(`[a2] 采集浏览器已就绪，已读取 ${auth.requests.length} 款游戏的请求模板`);
         const sink = new A2Base(this.options.appId, this.options.appSecret, this.options.wikiToken);
         for (const game of A2_GAMES) {
-          if (state.day === day && dates.every(date => state.done?.includes(`${game.code}:${date}`))) continue;
+          if (state.day === day && dates.every(date => state.done?.includes(`${game.code}:${date}`))) {
+            skipped += dates.length;
+            console.debug(`[a2] ${game.name} 目标日期已写入，跳过`);
+            continue;
+          }
+          let failure = "打开云图人群资产页面失败";
+          let activeDate: string | undefined;
           try {
             const template = auth.requests.find(r => new URL(r.url).searchParams.get("aadvid") === game.aid);
-            if (!template) throw new Error("请在插件中访问此游戏的云图人群资产页并上传");
+            if (!template) throw new Error("缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
+            console.debug(`[a2] ${game.name} 正在打开云图人群资产页面`);
             const page = await context.newPage();
             try {
               await page.goto(`https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution?aadvid=${game.aid}`, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -137,7 +168,14 @@ export class A2Service {
               if (new URL(page.url()).pathname.startsWith("/account/login")) throw new Error("云图登录未恢复，请重新上传登录态");
               for (const date of dates) {
                 const key = `${game.code}:${date}`;
-                if (state.day === day && state.done?.includes(key)) continue;
+                if (state.day === day && state.done?.includes(key)) {
+                  skipped++;
+                  console.debug(`[a2] ${game.name} ${date} 已写入，跳过`);
+                  continue;
+                }
+                activeDate = date;
+                failure = "读取云图 A2 数据失败";
+                console.debug(`[a2] ${game.name} ${date} 正在读取云图 A2 数据`);
                 const u = new URL(template.url);
                 u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
                 for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
@@ -148,30 +186,46 @@ export class A2Service {
                   try {
                     const payload = await page.evaluate(async ({url, headers}: {url: string; headers: Record<string, string>}) => {
                       const response = await fetch(url, { headers, credentials: "include", signal: AbortSignal.timeout(30000) });
-                      if (!response.ok) throw new Error("云图 HTTP 请求失败");
-                      return response.json();
+                      if (!response.ok) throw new Error(`云图 HTTP 请求失败（${response.status}）`);
+                      try { return await response.json(); }
+                      catch { throw new Error("云图响应不是有效 JSON"); }
                     }, {url: u.href, headers: template.headers});
                     values = parseA2(payload); break;
                   } catch (error) {
                     if (attempt === 2) throw error;
+                    console.warn(`[a2] ${game.name} ${date} 第 ${attempt + 1}/3 次读取失败：${collectionError(error, failure)}，即将重试`);
                     await page.waitForTimeout(1000 * (attempt + 1));
                   }
                 }
                 if (!values) throw new Error("云图缺少有效 A2 数值");
+                console.debug(`[a2] ${game.name} ${date} 云图读取成功，正在写入飞书多维表`);
+                failure = "飞书多维表写入失败";
                 await sink.upsert(game.name, date!, values);
                 if (state.day !== day) { state.day = day; state.done = []; }
                 state.done ??= []; state.done.push(key);
+                failure = "保存采集进度失败";
                 await atomicJson(path, state);
+                written++;
+                console.info(`[a2] ${game.name} ${date} 飞书多维表写入成功`);
               }
             } finally { await page.close(); }
-          } catch (error) { errors.push(`${game.name}采集或写入失败：${collectionError(error)}`); }
+          } catch (error) {
+            const reason = collectionError(error, failure);
+            errors.push(`${game.name}：${reason}`);
+            console.error(`[a2] ${game.name}${activeDate ? ` ${activeDate}` : ""}：${reason}`);
+          }
         }
+        browserFailure = "关闭采集浏览器失败";
       } finally { await browser.close(); }
-    } catch { errors.push("无法启动采集浏览器，请检查 CHROMIUM_PATH"); }
+    } catch {
+      errors.push(browserFailure);
+      console.error(`[a2] ${browserFailure}`);
+    }
     state.lastRunAt = now.toISOString(); state.errors = errors;
     if (!errors.length) state.completedDay = day;
     await atomicJson(path, state);
-    if (errors.length) throw new Error(errors.join("；"));
+    console.info(`[a2] ${day} 采集${errors.length ? "失败" : "完成"}，本次写入 ${written} 条，跳过 ${skipped} 条，失败 ${errors.length} 项，耗时 ${Math.round(performance.now() - started)}ms`);
+    if (errors.length) throw new A2CollectionError(errors.join("；"));
   }
 }
 

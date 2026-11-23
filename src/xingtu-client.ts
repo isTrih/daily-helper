@@ -217,8 +217,7 @@ export class XingtuClient {
     });
 
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 500);
-      throw new Error(`星图 API ${response.status}: ${body || response.statusText}`);
+      throw new Error(`星图 API 请求失败（HTTP ${response.status}）`);
     }
 
     const json: unknown = await response.json();

@@ -1,3 +1,4 @@
+import { A2CollectionError } from "./a2-service.ts";
 import { buildReportCard } from "./card.ts";
 import { LarkService } from "./lark-service.ts";
 import { dateInTimezone, ReportService } from "./report-service.ts";
@@ -147,7 +148,10 @@ export class ReportOrchestrator {
         results.push({ chatId: target.id, messageId, cardIndex });
         if (results.length === 1 && this.afterFirstDelivery) {
           try { await this.afterFirstDelivery(); }
-          catch { console.error("[a2] 采集失败；请在插件查看状态，后续日报会重试"); }
+          catch (error) {
+            const detail = error instanceof A2CollectionError ? `：${error.message}` : "";
+            console.error(`[a2] 采集失败${detail}；后续日报会重试`);
+          }
         }
       }
     });

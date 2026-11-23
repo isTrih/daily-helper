@@ -46,7 +46,7 @@ export function startServer(args: {
     hostname: config.host,
     port: config.port,
     maxRequestBodySize: 1024 * 1024,
-    async fetch(request, server) {
+    fetch: logRequests(async (request, server) => {
       const url = new URL(request.url);
       try {
         if (request.method === "GET" && url.pathname === "/api/recipients/users") {
@@ -216,11 +216,21 @@ export function startServer(args: {
         console.error("[http] 请求处理失败", error);
         return json({ error: errorMessage(error) }, 500);
       }
-    },
+    }),
   });
 
   console.info(`[http] 日报管理页已启动：http://localhost:${server.port}`);
   return server;
+}
+
+function logRequests(handle: (request: Request, server: Bun.Server<undefined>) => Promise<Response>) {
+  return async (request: Request, server: Bun.Server<undefined>) => {
+    const started = performance.now();
+    const response = await handle(request, server);
+    const path = response.status === 404 ? "(未匹配路由)" : new URL(request.url).pathname;
+    console.info(`[http] ${request.method} ${path} ${response.status} ${Math.round(performance.now() - started)}ms`);
+    return response;
+  };
 }
 
 function staticFile(name: "index.html" | "a2.html" | "a2.js" | "app.js" | "recipients.js" | "styles.css", type: string): Response {

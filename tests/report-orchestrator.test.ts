@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { A2CollectionError } from "../src/a2-service.ts";
 import { ReportOrchestrator } from "../src/report-orchestrator.ts";
 import type { PeriodReport, ProjectPeriod } from "../src/types.ts";
 
@@ -271,16 +272,23 @@ describe("ReportOrchestrator", () => {
   });
 });
 
-test("日报成功发送后触发采集，采集失败仍继续发送其他卡片", async () => {
+test.each([
+  [new A2CollectionError("缺少登录态，请通过插件上传"), "[a2] 采集失败：缺少登录态，请通过插件上传；后续日报会重试"],
+  [new Error("sensitive-fixture"), "[a2] 采集失败；后续日报会重试"],
+])("日报成功发送后触发采集，安全记录故障并继续发送其他卡片", async (error, expectedLog) => {
   const events: string[] = [];
   const orchestrator = new ReportOrchestrator({
     listPeriods: async () => periods,
     buildReports: async (ids: number[]) => ids.map(id => report(periods.find(p => p.activityPeriodId === id)!)),
   } as never, {sendCard:async()=>{events.push("send");return "message";}} as never,
-  "Asia/Shanghai", {}, {}, async()=>{events.push("a2");throw Error("fixture");});
-  const result = await orchestrator.send({chatIds:["chat"],periodIds:[10,20],mode:"single",rankingMode:"today"});
-  expect(result.messageCount).toBe(2);
-  expect(events).toEqual(["send","a2","send"]);
+  "Asia/Shanghai", {}, {}, async()=>{events.push("a2");throw error;});
+  const log = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const result = await orchestrator.send({chatIds:["chat"],periodIds:[10,20],mode:"single",rankingMode:"today"});
+    expect(result.messageCount).toBe(2);
+    expect(events).toEqual(["send","a2","send"]);
+    expect(log.mock.calls).toEqual([[expectedLog]]);
+  } finally { log.mockRestore(); }
 });
 
 test("混合收件人分别应用私聊转发策略，群失败后用户仍收到日报", async () => {
