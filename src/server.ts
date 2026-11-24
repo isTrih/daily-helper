@@ -1,4 +1,4 @@
-import type { A2Service } from "./a2-service.ts";
+import { A2CollectionError, type A2Service } from "./a2-service.ts";
 import { historyInput } from "./a2-history.ts";
 import { a2ReportRequest, A2_REPORT_GAMES, type A2ReportService } from "./a2-report.ts";
 import { timingSafeEqual } from "node:crypto";
@@ -30,6 +30,8 @@ const sendRequestSchema = reportRequestSchema.extend({
   recipients: recipientsSchema.optional(),
 }).refine(value => !!value.recipients?.length || !!value.chatIds?.length, { message: "请选择群聊或用户" });
 
+type A2RefreshJob = { id: string; status: "running" | "success" | "error"; error?: string };
+
 export function startServer(args: {
   a2Service?: A2Service;
   a2Reports?: A2ReportService;
@@ -41,6 +43,7 @@ export function startServer(args: {
   scheduleService?: ScheduleService;
 }) {
   const { config, reportService, larkService, orchestrator, scheduleService } = args;
+  let refreshJob: A2RefreshJob | undefined;
 
   const server = Bun.serve({
     hostname: config.host,
@@ -76,7 +79,7 @@ export function startServer(args: {
             let chats: Awaited<ReturnType<LarkService["listChats"]>> = [];
             let chatsError = "";
             try { chats = larkService ? await larkService.listChats() : []; } catch { chatsError = "无法读取群聊，请刷新或手动输入群聊 ID"; }
-            return json({ games: A2_REPORT_GAMES, chats, chatsError, schedules: args.a2Schedules?.list() ?? [], timezone: config.schedule.timezone, defaultChatId: config.lark.defaultChatId ?? "" });
+            return json({ games: A2_REPORT_GAMES, chats, chatsError, schedules: args.a2Schedules?.list() ?? [], timezone: config.schedule.timezone, defaultChatId: config.lark.defaultChatId ?? "", cloudRefreshEnabled: !!(config.a2.token && args.a2Service) });
           }
           if (["/api/a2/reports/preview", "/api/a2/reports/send"].includes(url.pathname) && request.method === "POST") {
             if (!args.a2Reports) return json({ error: "A2 日报未配置飞书应用" }, 503);
@@ -111,7 +114,25 @@ export function startServer(args: {
           if (!config.a2.token || actual.length !== expected.length || !timingSafeEqual(actual, expected)) return json({ error: "Unauthorized" }, 401);
           if (!args.a2Service) return json({ error: "A2 未启用" }, 503);
           if (request.method === "GET" && url.pathname === "/api/a2/status") return json(await args.a2Service.status());
+          if (request.method === "GET" && url.pathname === "/api/a2/collect") {
+            if (!refreshJob || refreshJob.id !== url.searchParams.get("job")) return json({ error: "采集任务已不存在，请重新拉取" }, 404);
+            return json(refreshJob);
+          }
           if (request.method === "POST" && url.pathname === "/api/a2/collect") {
+            if (url.searchParams.get("background") === "1") {
+              if (refreshJob?.status !== "running") {
+                const job: A2RefreshJob = { id: crypto.randomUUID(), status: "running" };
+                refreshJob = job;
+                void args.a2Service.run(undefined, { refreshLatest: true, runId: job.id }).then(
+                  () => { job.status = "success"; },
+                  error => {
+                    job.status = "error";
+                    job.error = error instanceof A2CollectionError ? error.message : "云图采集未完成，请查看服务端采集日志";
+                  },
+                );
+              }
+              return json(refreshJob, 202);
+            }
             // A full browser collection exceeds Bun's default 10-second idle limit.
             server.timeout(request, 0);
             await args.a2Service.run();

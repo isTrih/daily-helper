@@ -3,13 +3,60 @@ import { chromium } from "playwright-core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { A2Base, A2Service, A2_GAMES, a2Dates, browserCookies, authSchema, parseA2 } from "../src/a2-service.ts";
+import { A2Base, A2Service, A2_GAMES, a2Dates, browserCookies, authSchema, parseA2, readA2CloudJson } from "../src/a2-service.ts";
 
 const response = { status: 0, data: { profile: [{ title: "a2", cover_num: "2633119", count_average: "10395316", industry_avg: "3244622" }] } };
 const cookie = { name: "test", value: "fixture", domain: ".oceanengine.com", path: "/", secure: true, httpOnly: true, expires: -1, sameSite: "Lax" as const };
 const auth = { cookies: [cookie], requests: A2_GAMES.map(game => ({ url: `https://yuntu.oceanengine.com/yuntu_ng/api/v1/get_audience_asset_profile?aadvid=${game.aid}&brand_id=123&industry_id=22` })) };
+const pageEvents = { on() {}, off() {} };
 test("北京时间跨月 T-2/T-3", () => {
   expect(a2Dates(new Date("2026-11-30T16:01:00Z"))).toEqual({ day: "2026-12-01", dates: ["2026-11-29", "2026-11-28"] });
+});
+test("云图单次请求给 60 秒，读取响应体超时与 JSON 错误分开记录", async () => {
+  const controller = new AbortController();
+  const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+  const page = { evaluate: (evaluate: Function, args: unknown) => evaluate(args) } as never;
+  const url = "https://yuntu.oceanengine.com/yuntu_ng/api/v1/get_audience_asset_profile";
+  const fetchMock = spyOn(globalThis, "fetch").mockImplementation((async (_input, options) => {
+    expect(options?.signal).toBe(controller.signal);
+    return new Response("invalid-json");
+  }) as typeof fetch);
+  try {
+    await expect(readA2CloudJson(page, url, {})).rejects.toThrow("云图响应不是有效 JSON");
+    expect(timeout).toHaveBeenCalledWith(60_000);
+    const response = new Response();
+    response.json = async () => {
+      controller.abort();
+      throw new DOMException("Reading aborted", "AbortError");
+    };
+    fetchMock.mockResolvedValue(response);
+    await expect(readA2CloudJson(page, url, {})).rejects.toThrow("云图请求超时");
+  } finally {
+    fetchMock.mockRestore();
+    timeout.mockRestore();
+  }
+});
+test("云图网络日志只记录匹配请求的状态、内容类型和网络错误码", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const url = auth.requests[0]!.url + "&date=20261122";
+  const pathnameFixture = "fixture-param";
+  const request = { url: () => url + "&signature=" + pathnameFixture, failure: () => ({ errorText: "net::ERR_CONNECTION_RESET " + pathnameFixture }) };
+  const page = {
+    on: (event: string, listener: (value: unknown) => void) => listeners.set(event, listener),
+    off: (event: string) => listeners.delete(event),
+    evaluate: async () => {
+      listeners.get("request")!({ url: () => url.replace("20261122", "20261121") });
+      listeners.get("request")!(request);
+      listeners.get("response")!({ request: () => request, status: () => 503, headers: () => ({ "content-type": "text/html; " + pathnameFixture }) });
+      listeners.get("requestfailed")!(request);
+      throw new TypeError("Failed to fetch");
+    },
+  } as never;
+  let trace = "";
+  await expect(readA2CloudJson(page, url, {}, detail => { trace = detail; })).rejects.toThrow("Failed to fetch");
+  expect(trace).toBe("requests_seen=1 http_status=503 content_type=html net_error=ERR_CONNECTION_RESET");
+  expect(trace).not.toContain(pathnameFixture);
+  expect(listeners.size).toBe(0);
 });
 test("HAR 数字字符串解析，其他品牌取 count_average", () => {
   expect(parseA2(response)).toEqual({ A2: 2633119, other_A2: 10395316 });
@@ -29,6 +76,7 @@ test("五游戏缺口、并发及重启去重、次日只补新增缺口", async
   const rows: unknown[] = []; const urls: string[] = []; let attempts = 0;
   const launch = spyOn(chromium, "launch").mockResolvedValue({
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      ...pageEvents,
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution", goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
       evaluate: async (_fn: unknown, request: {url: string}) => { urls.push(request.url); if (attempts++ === 0) throw Error("transient read failure"); return response; },
     }) }), close: async () => {},
@@ -53,7 +101,7 @@ test("五游戏缺口、并发及重启去重、次日只补新增缺口", async
 });
 test("部分失败只重试未完成游戏，缺登录态记录可查看状态", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-retry-"));
-  const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async()=>response})}),close:async()=>{} } as never);
+  const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({...pageEvents,url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async()=>response})}),close:async()=>{} } as never);
   let fail = true; let count = 0;
   const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
@@ -80,6 +128,7 @@ test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () =
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockResolvedValue([]);
   const launch = spyOn(chromium, "launch").mockResolvedValue({
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      ...pageEvents,
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
       goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
       evaluate: async () => { throw new Error("page.evaluate: 云图 HTTP 请求失败（401）"); },
@@ -108,6 +157,7 @@ test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏�
       const pageNumber = ++pageCount;
       let closed = false;
       return {
+        ...pageEvents,
         url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
         goto: async () => {}, isClosed: () => closed,
         waitForTimeout: async () => { if (closed) throw Error("Target page, context or browser has been closed"); },
@@ -156,6 +206,7 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
   const debug = spyOn(console, "debug").mockImplementation(() => {});
   const launch = spyOn(chromium, "launch").mockResolvedValue({
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      ...pageEvents,
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
       goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
       evaluate: async (_fn: unknown, input: {url: string}) => { requests.push(new URL(input.url).searchParams.get("date")!); return response; },
@@ -173,15 +224,24 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
     expect(writes).toEqual([
       "战火勋章:2026-11-22", "战火勋章:2026-11-21", "战火勋章:2026-11-19", "小冰冰传奇:2026-11-21", "万国觉醒:2026-11-22",
     ]);
-    expect((await service.status()).coverageThrough).toBe("2026-11-22");
+    const status = await service.status();
+    expect(status.coverageThrough).toBe("2026-11-22");
+    expect(status.lastRunId).toMatch(/^[a-f0-9-]{36}$/);
     expect(debug.mock.calls.some(([line]) => String(line).includes("待补 3 天：2026-11-22、2026-11-21、2026-11-19"))).toBe(true);
-    expect(debug.mock.calls.every(([line]) => String(line).startsWith("[debug]"))).toBe(true);
+    expect(debug.mock.calls.every(([line]) => String(line).startsWith(`[debug] [a2] run_id=${status.lastRunId} `))).toBe(true);
     debug.mockClear();
     for (const name of tableDates.keys()) tableDates.set(name, ["2026-11-23"]);
     await new A2Service({ ...options, debug: false }).run(new Date("2026-11-24T16:00:01Z"));
     expect(debug.mock.calls).toHaveLength(0);
     expect(launch).toHaveBeenCalledTimes(1);
     expect(listDates).toHaveBeenCalledTimes(10);
+    for (const name of tableDates.keys()) tableDates.set(name, ["2026-11-22", "2026-11-23"]);
+    tableDates.set("战火勋章", ["2026-11-21", "2026-11-23"]);
+    await service.run(new Date("2026-11-24T16:00:01Z"), { refreshLatest: true });
+    expect(writes.slice(5)).toEqual([
+      "战火勋章:2026-11-23", "战火勋章:2026-11-22", "小冰冰传奇:2026-11-23",
+      "万国觉醒:2026-11-23", "万龙觉醒:2026-11-23", "塔塔冒险队:2026-11-23",
+    ]);
   } finally {
     upsert.mockRestore();
     launch.mockRestore();

@@ -1,6 +1,8 @@
 import { RecipientPicker, savedRecipients } from "/recipients.js?v=2";
 const $ = id => document.getElementById(id);
-const state = { games: [], chats: [], schedules: [], editing: null, busy: false };
+const state = { games: [], chats: [], schedules: [], editing: null, busy: false, cloudRefreshEnabled: false };
+const refreshDialog = $('a2RefreshDialog');
+const refreshToken = $('a2RefreshToken');
 const wan = n => `${(n / 10000).toFixed(2)}万`;
 const change = (n, old) => old == null ? '暂无对照' : `${n-old>0?'+':''}${wan(n-old)} · ${old===0?'基数为零':`${n-old>=0?'+':''}${((n-old)/old*100).toFixed(2)}%`}`;
 const selectedGames = () => [...document.querySelectorAll('input[name="a2Game"]:checked')].map(el=>el.value);
@@ -10,30 +12,67 @@ function notice(text, error = false) { $('a2Notice').textContent = text; $('a2No
 function busy(value) { state.busy=value; for(const id of ['a2PreviewButton','a2RefreshReportButton','a2SendButton','a2SaveSchedule','refreshA2']) $(id).disabled=value; $('a2SendButton').textContent=value?'正在处理…':'发送 A2 日报'; }
 async function api(path, method='GET', body) { const r=await fetch('/api/a2/reports/'+path,{method,cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});const data=await r.json();if(!r.ok)throw Error(data.error||'操作失败，请重试');return data; }
 function choice(name,value,title,checked=true) {const label=document.createElement('label');label.className='choice';const input=document.createElement('input');input.type='checkbox';input.name=name;input.value=value;input.checked=checked;const text=document.createElement('strong');text.textContent=title;label.append(input,text);return label;}
-async function bootstrap() { busy(true);try {const data=await api('bootstrap');const hadSelection=state.games.length>0;const old=selectedGames();state.games=data.games;state.chats=data.chats;$('a2Games').replaceChildren(...data.games.map(g=>choice('a2Game',g.code,g.name,hadSelection?old.includes(g.code):true)));recipientPicker.setChats(data.chats,data.defaultChatId,data.chatsError);renderSchedules(data.schedules);notice('选择游戏后预览，或保存独立的 A2 每日计划。');}catch(e){notice(e.message,true);}finally{busy(false);} }
+async function bootstrap() { busy(true);try {const data=await api('bootstrap');const hadSelection=state.games.length>0;const old=selectedGames();state.games=data.games;state.chats=data.chats;state.cloudRefreshEnabled=data.cloudRefreshEnabled;$('a2Games').replaceChildren(...data.games.map(g=>choice('a2Game',g.code,g.name,hadSelection?old.includes(g.code):true)));recipientPicker.setChats(data.chats,data.defaultChatId,data.chatsError);renderSchedules(data.schedules);notice('选择游戏后预览，或保存独立的 A2 每日计划。');}catch(e){notice(e.message,true);}finally{busy(false);} }
 function selection() {const games=selectedGames();if(!games.length)throw Error('请至少选择一款游戏');return games;}
 async function run(action = 'preview') {
   if (state.busy) return;
   try {
     const gameCodes = selection();
     const send = action === 'send';
-    const refresh = action === 'refresh';
     const recipients = send ? selectedRecipients() : [];
     if (send && !recipients.length) throw Error('请选择或输入群聊或用户');
     busy(true);
-    if (refresh) $('a2RefreshReportButton').textContent = '正在重新拉取…';
-    notice(send ? '正在发送 A2 日报…' : refresh ? '正在重新拉取 A2 数据…' : '正在读取 A2 数据…');
-    const body = send ? { gameCodes, recipients } : { gameCodes, ...(refresh ? { refresh } : {}) };
+    notice(send ? '正在发送 A2 日报…' : '正在读取 A2 数据…');
+    const body = send ? { gameCodes, recipients } : { gameCodes };
     const data = await api(send ? 'send' : 'preview', 'POST', body);
     if (send) notice(`A2 日报已发送，共 ${data.messageCount} 条消息`);
     else {
       renderReports(data.reports, data.dashboardUrl, data.reports, data.viewState);
-      notice(refresh ? '已重新拉取 A2 数据，预览已更新。' : '已使用飞书实际数据生成预览。');
+      notice('已使用飞书实际数据生成预览。');
     }
   } catch (e) {
     notice(e.message, true);
   } finally {
-    $('a2RefreshReportButton').textContent = '重新拉取数据';
+    busy(false);
+  }
+}
+
+async function collectCloud(query, method, token) {
+  const response = await fetch('/api/a2/collect?' + query, {
+    method, cache: 'no-store', redirect: 'error', headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401) throw Error('采集令牌不正确，请核对服务器的 A2_UPLOAD_TOKEN。');
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.id) throw Error(data?.error || '无法获取云图采集状态，请重试。');
+  return data;
+}
+
+async function refreshFromCloud(token) {
+  if (state.busy) return;
+  const gameCodes = selectedGames();
+  const button = $('a2RefreshReportButton');
+  let collected = false;
+  busy(true);
+  button.textContent = '正在从云图拉取…';
+  notice('正在从云图采集并写入飞书。采集和历史补数可能需要几分钟。');
+  try {
+    let job = await collectCloud('background=1', 'POST', token);
+    while (job.status === 'running') {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      job = await collectCloud(new URLSearchParams({ job: job.id }), 'GET', token);
+    }
+    if (job.status !== 'success') throw Error(`${job.error || '云图采集未完成。'}（运行编号 ${job.id}）`);
+    collected = true;
+    if (gameCodes.length) {
+      notice('云图采集已写入飞书，正在更新预览…');
+      const data = await api('preview', 'POST', { gameCodes, refresh: true });
+      renderReports(data.reports, data.dashboardUrl, data.reports, data.viewState);
+    }
+    notice(gameCodes.length ? '已从云图重新采集并写入飞书，预览已更新。' : '已从云图重新采集并写入飞书。');
+  } catch (error) {
+    notice(collected ? `采集已写入飞书，预览更新失败：${error.message}` : error.message, true);
+  } finally {
+    button.textContent = '从云图重新拉取';
     busy(false);
   }
 }
@@ -72,6 +111,19 @@ $('a2SaveSchedule').onclick=async()=>{try{const gameCodes=selection();const reci
 $('a2CancelEdit').onclick=cancelEdit;
 $('refreshA2').onclick=bootstrap;
 $('a2PreviewButton').onclick=()=>run();
-$('a2RefreshReportButton').onclick=()=>run('refresh');
+$('a2RefreshReportButton').onclick = () => {
+  if (!state.cloudRefreshEnabled) {
+    notice('服务器尚未启用手动云图采集，请配置 A2_UPLOAD_TOKEN 并重启服务。', true);
+    return;
+  }
+  refreshDialog.returnValue = '';
+  refreshDialog.showModal();
+};
+$('a2CancelRefresh').onclick = () => refreshDialog.close();
+refreshDialog.addEventListener('close', () => {
+  const token = refreshToken.value.trim();
+  refreshToken.value = '';
+  if (refreshDialog.returnValue === 'collect' && token) void refreshFromCloud(token);
+});
 $('a2Form').onsubmit=e=>{e.preventDefault();run('send');};
 bootstrap();

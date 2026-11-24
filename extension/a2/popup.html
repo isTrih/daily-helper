@@ -1,1 +1,21 @@
-<!doctype html><html lang="zh"><meta charset="utf-8"><title>A2 登录态</title><body style="width:350px;font:14px sans-serif;padding:16px"><h3>云图 A2 登录态</h3><p>先登录云图，并依次访问五款游戏的人群资产页面。点击上传会将云图 Cookie 发送到下方域名，无需填写令牌。</p><label>服务器（测试时改为测试域名）<input id="origin" style="width:100%" value="https://daily.lilith.ali.trih.top/"></label><button id="upload">上传登录态</button><pre id="result" style="white-space:pre-wrap"></pre><script src="popup.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>云图 A2 采集</title>
+<body style="width:350px;font:14px sans-serif;padding:16px">
+  <h3>云图 A2 采集</h3>
+  <label>服务器（测试时改为测试域名）
+    <input id="origin" style="width:100%" value="https://daily.lilith.ali.trih.top/">
+  </label>
+  <p>登录云图并访问五款游戏的人群资产页面后，可将登录态上传到所选服务器。上传无需令牌。</p>
+  <button id="upload" type="button">上传登录态</button>
+  <hr>
+  <p>重新采集五款游戏的 T−2 数据，补齐缺口并写入飞书。</p>
+  <label>采集令牌
+    <input id="collectToken" type="password" autocomplete="off" style="width:100%">
+  </label>
+  <button id="collect" type="button">从云图重新拉取</button>
+  <p id="result" role="status" aria-live="polite" style="overflow-wrap:anywhere"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

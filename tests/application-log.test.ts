@@ -27,16 +27,20 @@ test("小时轮转跨月，重启和空闲清理只移除超期应用日志", as
 
 test("应用日志记录错误和堆栈，移除凭证、原始对象和 URL 查询", async () => {
   const dir = await mkdtemp(join(tmpdir(), "app-log-redact-"));
-  const stop = installApplicationLogger(dir, ["configured-fixture"]);
+  const stop = installApplicationLogger(dir, ["configured-fixture", "11"]);
   try {
     console.error("[a2] 读取失败", new Error("configured-fixture"), { cookies: [{ value: "object-fixture" }] });
     console.warn("请求 https://user:password@example.com/status?arg=query-fixture Cookie: sessionid=cookie-fixture");
     console.log("Authorization: Bearer bearer-fixture");
+    console.error("[a2] run_id=11111111-1111-4111-8111-111111111111 stage=cloud_request date=2026-11-22 code=network_error net_error=ERR_CONNECTION_RESET");
+    console.log("standalone 11");
     const files = await readdir(dir);
     const output = (await Promise.all(files.map(file => readFile(join(dir, file), "utf8")))).join("");
     expect(output).toContain("[ERROR] [a2] 读取失败 Error: [REDACTED]");
     expect(output).toContain("application-log.test.ts");
     expect(output).toContain("https://example.com/status");
+    expect(output).toContain("run_id=11111111-1111-4111-8111-111111111111 stage=cloud_request date=2026-11-22");
+    expect(output).toContain("standalone [REDACTED]");
     for (const value of ["configured-fixture", "object-fixture", "query-fixture", "cookie-fixture", "bearer-fixture", "user:password"]) {
       expect(output).not.toContain(value);
     }

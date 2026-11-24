@@ -4,7 +4,46 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startServer } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
-import { A2Service } from "../src/a2-service.ts";
+import { A2CollectionError, A2Service } from "../src/a2-service.ts";
+
+test("云图后台采集需要令牌，同一时刻只启动一次，完成后可查询结果", async () => {
+  const config = readConfig({ INTERNAL_API_TOKEN: "fixture", A2_UPLOAD_TOKEN: "collect-fixture", HOST: "127.0.0.1" });
+  let pending = Promise.withResolvers<void>();
+  const calls: unknown[] = [];
+  const a2Service = { run: (...input: unknown[]) => { calls.push(input); return pending.promise; } } as never;
+  const server = startServer({ config: { ...config, port: 0 }, reportService: {} as never, orchestrator: {} as never, a2Service });
+  const base = `http://127.0.0.1:${server.port}`;
+  const collect = `${base}/api/a2/collect`;
+  const authorized = { Authorization: "Bearer collect-fixture" };
+  const start = () => fetch(`${collect}?background=1`, { method: "POST", headers: authorized });
+  const status = (id: string, headers = authorized) => fetch(`${collect}?job=${id}`, { headers });
+  try {
+    const bootstrap = await (await fetch(`${base}/api/a2/reports/bootstrap`)).json() as Record<string, unknown>;
+    expect(bootstrap.cloudRefreshEnabled).toBe(true);
+    expect(JSON.stringify(bootstrap)).not.toContain("collect-fixture");
+    expect((await fetch(`${collect}?background=1`, { method: "POST" })).status).toBe(401);
+    expect(calls).toHaveLength(0);
+    const response = await start();
+    expect(response.status).toBe(202);
+    const job = await response.json() as { id: string; status: string };
+    expect(job.status).toBe("running");
+    expect(await (await start()).json()).toEqual(job);
+    expect(await (await status(job.id)).json()).toEqual(job);
+    expect((await status(job.id, { Authorization: "" })).status).toBe(401);
+    expect(calls).toEqual([[undefined, { refreshLatest: true, runId: job.id }]]);
+    pending.resolve();
+    expect(await (await status(job.id)).json()).toEqual({ id: job.id, status: "success" });
+
+    pending = Promise.withResolvers<void>();
+    const failed = await (await start()).json() as { id: string };
+    pending.reject(new A2CollectionError("云图登录未恢复，请重新上传登录态"));
+    expect(await (await status(failed.id)).json()).toEqual({
+      id: failed.id, status: "error", error: "云图登录未恢复，请重新上传登录态",
+    });
+  } finally {
+    server.stop(true);
+  }
+});
 
 test("上传无需令牌但校验协议、严格结构和来源；管理状态仍受保护", async()=>{
  const dir=await mkdtemp(join(tmpdir(),"a2-http-"));

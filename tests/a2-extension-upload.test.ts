@@ -10,23 +10,26 @@ const cookie = {
   secure: true, httpOnly: true, session: true, sameSite: "lax",
 };
 
-function extension(initialRequests: unknown[] = [], cookies: unknown[] = [cookie]) {
+type ExtensionReply = { ok?: boolean; error?: string; job?: { id: string; status: string } };
+
+function extension(initialRequests: unknown[] = [], cookies: unknown[] = [cookie], collect?: (endpoint: URL, options: RequestInit) => Response) {
   let requests = initialRequests;
   let capture!: (details: { url: string; requestHeaders?: { name: string; value: string }[] }) => void;
-  let upload!: (message: unknown, sender: unknown, reply: (result: { ok?: boolean; error?: string }) => void) => void;
+  let onMessage!: (message: unknown, sender: unknown, reply: (result: ExtensionReply) => void) => void;
   const bodies: unknown[] = [];
   runInNewContext(background, {
     URL, AbortSignal,
     chrome: {
       webRequest: { onBeforeSendHeaders: { addListener: (listener: typeof capture) => { capture = listener; } } },
-      runtime: { onMessage: { addListener: (listener: typeof upload) => { upload = listener; } } },
+      runtime: { onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; } } },
       storage: { local: {
         get: async () => ({ requests }),
         set: async (data: { requests: unknown[] }) => { requests = data.requests; },
       } },
       cookies: { getAll: async () => cookies },
     },
-    fetch: async (_url: URL, options: RequestInit) => {
+    fetch: async (endpoint: URL, options: RequestInit) => {
+      if (endpoint.pathname === "/api/a2/collect" && collect) return collect(endpoint, options);
       const body = JSON.parse(options.body as string);
       bodies.push(body);
       const parsed = authSchema.safeParse(body);
@@ -35,9 +38,10 @@ function extension(initialRequests: unknown[] = [], cookies: unknown[] = [cookie
         : Response.json({ error: "请求参数无效", details: z.flattenError(parsed.error) }, { status: 400 });
     },
   });
+  const dispatch = (message: Record<string, string>) => new Promise<ExtensionReply>(resolve => onMessage({ origin: "http://localhost:3000", ...message }, {}, resolve));
   return {
-    capture, bodies,
-    upload: () => new Promise<{ ok?: boolean; error?: string }>(resolve => upload({ type: "upload", origin: "http://localhost:3000" }, {}, resolve)),
+    capture, bodies, dispatch,
+    upload: () => dispatch({ type: "upload" }),
   };
 }
 
@@ -53,6 +57,22 @@ test("后续不符合上传协议的请求不会覆盖同游戏的有效模板",
     expect(await browser.upload()).toMatchObject({ ok: true });
     expect(browser.bodies.at(-1)).toMatchObject({ requests: [{ url, headers: {} }] });
   }
+});
+
+test("插件启动和查询后台采集时只传令牌，不上传云图 Cookie", async () => {
+  const calls: Array<[string, string | undefined]> = [];
+  const browser = extension([], [], (endpoint, options) => {
+    calls.push([endpoint.search, options.method]);
+    expect(options.headers).toEqual({ Authorization: "Bearer collect-test" });
+    expect(options.body).toBeUndefined();
+    expect(options.redirect).toBe("error");
+    return Response.json({ id: "job-1", status: options.method === "POST" ? "running" : "success" });
+  });
+  const started = await browser.dispatch({ type: "collect-start", token: "collect-test" });
+  expect(started.job).toEqual({ id: "job-1", status: "running" });
+  expect((await browser.dispatch({ type: "collect-status", token: "collect-test", job: started.job!.id })).job?.status).toBe("success");
+  expect(calls).toEqual([["?background=1", "POST"], ["?job=job-1", "GET"]]);
+  expect(browser.bodies).toHaveLength(0);
 });
 
 test("历史无效模板提示重新访问云图页面，不发送必然失败的请求", async () => {

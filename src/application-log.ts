@@ -83,7 +83,15 @@ export function installApplicationLogger(dir: string, secrets: (string | undefin
   for (const level of levels) {
     console[level] = (...args: unknown[]) => {
       let message = formatWithOptions({ colors: false, customInspect: false }, ...args.map(value => logValue(value)));
-      for (const secret of sensitiveValues) message = message.replaceAll(secret, "[REDACTED]");
+      const a2Trace = /^(?:\[debug\] )?\[(?:a2|a2-history)\] run_id=[a-f0-9-]{36} /.test(message);
+      for (const secret of sensitiveValues) {
+        if (!a2Trace || secret.length >= 8) message = message.replaceAll(secret, "[REDACTED]");
+        else {
+          // A short token can also appear inside a date, UUID, or error code.
+          const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          message = message.replace(new RegExp(`(?<![A-Za-z0-9_./-])${escaped}(?![A-Za-z0-9_./-])`, "g"), "[REDACTED]");
+        }
+      }
       message = message
         .replace(/\b(?:https?|wss?):\/\/[^\s<>"']+/gi, value => {
           try {

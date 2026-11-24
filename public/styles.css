@@ -252,6 +252,13 @@ input[type="text"]:focus, input[type="time"]:focus, select:focus { border-color:
 .a2-heading p { color:#52635a; max-width:65ch; line-height:1.6; }
 .a2-games { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:20px; }
 .a2-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; }
+.a2-refresh-dialog { width: min(400px, calc(100% - 32px)); border: 1px solid var(--line); border-radius: 16px; padding: 24px; color: var(--ink); background: white; }
+.a2-refresh-dialog::backdrop { background: rgba(23, 35, 29, .45); }
+.a2-refresh-dialog p { margin: 10px 0 18px; font-size: 14px; line-height: 1.6; }
+.a2-refresh-dialog label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+.a2-refresh-dialog input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; font: inherit; }
+.a2-refresh-dialog :is(input, button):focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.a2-refresh-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .a2-preview-panel { min-width:0; align-self:start; }
 .a2-preview-panel h3 { margin:22px 0 12px; font-size:17px; }
 .a2-metrics { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; margin:14px 0; font-variant-numeric:tabular-nums; }

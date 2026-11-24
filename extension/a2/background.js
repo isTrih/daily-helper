@@ -40,7 +40,30 @@ chrome.webRequest.onBeforeSendHeaders.addListener(details => {
     await chrome.storage.local.set({requests:next});
   }).catch(() => {});
 }, {urls:['https://yuntu.oceanengine.com/yuntu_ng/api/v1/get_audience_asset_profile*','https://yuntu.oceanengine.com/yuntu_ng/api/v1/get_audience_asset_trend*']}, ['requestHeaders']);
+
+async function collectA2(message) {
+  const url = new URL('/api/a2/collect', message.origin);
+  const start = message.type === 'collect-start';
+  if (start) url.searchParams.set('background', '1');
+  else url.searchParams.set('job', message.job);
+  const response = await fetch(url, {
+    method: start ? 'POST' : 'GET',
+    headers: { Authorization: `Bearer ${message.token}` },
+    redirect: 'error',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status === 401) throw Error('采集令牌不正确，或服务器尚未配置 A2_UPLOAD_TOKEN。');
+  const job = await response.json().catch(() => null);
+  if (!response.ok || !job?.id) throw Error(job?.error || '无法获取云图采集状态，请检查服务器版本。');
+  return { ok: true, job };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message.type === 'collect-start' || message.type === 'collect-status') {
+    collectA2(message).then(reply, error => reply({ error: error.message }));
+    return true;
+  }
   if (message.type !== 'upload') return;
   (async () => {
     await chain;
