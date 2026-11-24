@@ -302,9 +302,8 @@ export class A2Service {
       trace.error(`stage=state_read code=state_read_failed ${reason}`);
       throw new A2CollectionError(reason);
     });
-    if (!refreshLatest && state.completedDay === day && state.coverageThrough === through) {
-      debug(`${day} 已核对并补齐至 ${through}，跳过本次触发`);
-      return;
+    if (state.completedDay === day && state.coverageThrough === through) {
+      debug(`${day} 有完成记录，本次仍以飞书现有日期核对缺口`);
     }
     trace.info(`stage=start mode=${refreshLatest ? "manual_refresh" : "daily"} day=${day} through=${through} 开始采集`);
     const errors: string[] = [];
@@ -358,6 +357,8 @@ export class A2Service {
                 const key = `${game.code}:${date}`;
                 activeDate = date;
                 const scope = `game=${game.code} date=${date}`;
+                stage = "cloud_request";
+                stageStarted = performance.now();
                 failure = "读取云图 A2 数据失败";
                 const u = new URL(template.url);
                 u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
@@ -401,21 +402,28 @@ export class A2Service {
                   if (reason.startsWith("云图登录未恢复")) break;
                   continue;
                 }
-                stage = "feishu_write";
-                stageStarted = performance.now();
-                debug(`stage=${stage} ${scope} ${game.name} 开始写入飞书多维表`);
-                failure = "飞书多维表写入失败";
-                await sink.upsert(game.name, date!, values);
-                debug(`stage=${stage} ${scope} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 写入成功`);
-                if (state.day !== day) { state.day = day; state.done = []; }
-                state.done ??= [];
-                if (!state.done.includes(key)) state.done.push(key);
-                stage = "state_write";
-                stageStarted = performance.now();
-                failure = "保存采集进度失败";
-                await atomicJson(path, state);
-                written++;
-                debug(`stage=${stage} ${scope} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 进度已保存`);
+                try {
+                  stage = "feishu_write";
+                  stageStarted = performance.now();
+                  const createOnly = !refreshLatest || date !== through;
+                  debug(`stage=${stage} ${scope} policy=${createOnly ? "insert_missing" : "refresh_latest"} ${game.name} 开始写入飞书多维表`);
+                  failure = "飞书多维表写入失败";
+                  const action = await sink.upsert(game.name, date, values, { createOnly });
+                  if (action !== "already_exists") written++;
+                  debug(`stage=${stage} ${scope} action=${action} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 写入处理完成`);
+                  if (state.day !== day) { state.day = day; state.done = []; }
+                  state.done ??= [];
+                  if (!state.done.includes(key)) state.done.push(key);
+                  stage = "state_write";
+                  stageStarted = performance.now();
+                  failure = "保存采集进度失败";
+                  await atomicJson(path, state);
+                  debug(`stage=${stage} ${scope} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 进度已保存`);
+                } catch (error) {
+                  const reason = collectionError(error, failure);
+                  errors.push(`${game.name} ${date}：${reason}`);
+                  trace.error(`stage=${stage} ${scope} ${a2ErrorDetails(error, reason)} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name}：${reason}`);
+                }
               }
             } catch (error) {
               const reason = collectionError(error, failure);
@@ -552,7 +560,7 @@ export class A2Base {
     }
     return tableRoot;
   }
-  async upsert(name: string, date: string, a2: { A2: number; other_A2: number }) {
+  async upsert(name: string, date: string, a2: { A2: number; other_A2: number }, { createOnly = false } = {}): Promise<"created" | "updated" | "already_exists"> {
     const tableRoot = await this.tableRoot(name);
     const timestamp = Date.parse(`${date}T00:00:00+08:00`);
     const rows = await this.items(`${tableRoot}/records`, "items");
@@ -561,9 +569,14 @@ export class A2Base {
       return typeof value === "number" && a2Dates(new Date(value)).day === date;
     });
     if (matches.length > 1) throw new Error("日期存在重复记录，请先合并");
+    if (matches[0] && createOnly) return "already_exists";
     const fieldsValue = { 日期: timestamp, ...a2, 游戏: name };
-    if (matches[0]) await this.api(`${tableRoot}/records/${matches[0].record_id}`, "PUT", { fields: fieldsValue });
-    else await this.api(`${tableRoot}/records`, "POST", { fields: fieldsValue });
+    if (matches[0]) {
+      await this.api(`${tableRoot}/records/${matches[0].record_id}`, "PUT", { fields: fieldsValue });
+      return "updated";
+    }
+    await this.api(`${tableRoot}/records`, "POST", { fields: fieldsValue });
+    return "created";
   }
   async upsertMany(name: string, input: Array<{ date: string; A2: number; other_A2: number }>) {
     const tableRoot = await this.tableRoot(name);

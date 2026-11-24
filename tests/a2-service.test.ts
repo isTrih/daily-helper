@@ -83,9 +83,10 @@ test("五游戏缺口、并发及重启去重、次日只补新增缺口", async
   } as never);
   const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (...row) => {
-    rows.push(row);
-    tableDates.get(row[0])!.push(row[1]);
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (game, date, values) => {
+    rows.push([game, date, values]);
+    tableDates.get(game)!.push(date);
+    return "created";
   });
   const options = { token: "test", dir, appId:"test", appSecret:"test", wikiToken:"test", executablePath:"test" };
   try {
@@ -109,6 +110,7 @@ test("部分失败只重试未完成游戏，缺登录态记录可查看状态",
     if(fail && name === "万龙觉醒") throw Error("sensitive-fixture");
     tableDates.get(name)!.push(date);
     count++;
+    return "created";
   });
   try {
     const service = new A2Service({token:"test",dir,appId:"test",appSecret:"test",wikiToken:"test",executablePath:"test"});
@@ -116,8 +118,8 @@ test("部分失败只重试未完成游戏，缺登录态记录可查看状态",
     await expect(service.run(now)).rejects.toThrow("缺少登录态");
     expect((await service.status()).errors).toHaveLength(1);
     await service.upload(auth);
-    await expect(service.run(now)).rejects.toThrow("万龙觉醒：飞书多维表写入失败");
-    expect((await service.status()).errors).toEqual(["万龙觉醒：飞书多维表写入失败"]);
+    await expect(service.run(now)).rejects.toThrow("万龙觉醒 2026-11-14：飞书多维表写入失败");
+    expect((await service.status()).errors).toEqual(["万龙觉醒 2026-11-14：飞书多维表写入失败", "万龙觉醒 2026-11-13：飞书多维表写入失败"]);
     expect(count).toBe(8);
     fail=false; await service.run(now); expect(count).toBe(10);
     expect((await service.status()).completedDay).toBe("2026-11-16");
@@ -174,7 +176,7 @@ test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏�
       };
     }}), close: async () => {},
   } as never);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (_name, date) => { writes.push(date); });
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (_name, date) => { writes.push(date); return "created"; });
   try {
     const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" });
     await service.upload({ ...auth, requests: auth.requests.slice(0, 1) });
@@ -212,7 +214,7 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
       evaluate: async (_fn: unknown, input: {url: string}) => { requests.push(new URL(input.url).searchParams.get("date")!); return response; },
     }) }), close: async () => {},
   } as never);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (name, date) => { writes.push(`${name}:${date}`); });
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (name, date) => { writes.push(`${name}:${date}`); return "created"; });
   const options = { token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" };
   const now = new Date("2026-11-23T16:00:01Z");
   try {
@@ -250,6 +252,70 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
     await rm(dir, { recursive: true, force: true });
   }
 });
+test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 日", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "a2-unordered-dates-"));
+  const datetime = (day: string) => Date.parse(`2026-11-${day}T00:00:00+08:00`);
+  const rows = ["22", "21", "17"].map(day => ({ record_id: `row-${day}`, fields: { 日期: datetime(day) } }));
+  const inserted: number[] = [];
+  const attempted: number[] = [];
+  let failFirst = true;
+  const stub = spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    const url = new URL(String(input));
+    const path = url.pathname;
+    const method = init?.method ?? "GET";
+    if (path.endsWith("/tenant_access_token/internal")) return Response.json({ code: 0, tenant_access_token: "fixture" });
+    if (path.endsWith("/get_node")) return Response.json({ code: 0, data: { node: { obj_type: "bitable", obj_token: "base" } } });
+    if (path.endsWith("/tables")) return Response.json({ code: 0, data: { items: A2_GAMES.map(game => ({ name: game.name, table_id: game.code })), has_more: false } });
+    if (path.endsWith("/fields")) {
+      const items = [
+        { field_name: "日期", type: 5 }, { field_name: "游戏", type: 1 },
+        ...["A2", "other_A2"].map(field_name => ({ field_name, type: 2, property: { formatter: "1,000" } })),
+      ];
+      return Response.json({ code: 0, data: { items, has_more: false } });
+    }
+    if (path.endsWith("/w/records") && method === "POST") {
+      const value = JSON.parse(String(init?.body)).fields.日期 as number;
+      attempted.push(value);
+      if (failFirst) { failFirst = false; return Response.json({ code: 503 }, { status: 503 }); }
+      inserted.push(value);
+      rows.push({ record_id: `new-${value}`, fields: { 日期: value } });
+      return Response.json({ code: 0, data: {} });
+    }
+    if (path.endsWith("/w/records") && method === "GET") {
+      const next = url.searchParams.has("page_token");
+      return Response.json({ code: 0, data: { items: next ? rows.slice(2) : rows.slice(0, 2), has_more: !next, page_token: "next" } });
+    }
+    if (path.endsWith("/records") && method === "GET") {
+      return Response.json({ code: 0, data: { items: [{ fields: { 日期: datetime("22") } }], has_more: false } });
+    }
+    throw Error(`Unexpected Feishu operation: ${method} ${path}`);
+  }) as typeof fetch);
+  const launch = spyOn(chromium, "launch").mockResolvedValue({
+    newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      ...pageEvents, url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
+      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {}, evaluate: async () => response,
+    }) }), close: async () => {},
+  } as never);
+  try {
+    const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test", debug: false });
+    const now = new Date("2026-11-24T04:00:00Z");
+    await writeFile(join(dir, "state.json"), JSON.stringify({ completedDay: "2026-11-24", coverageThrough: "2026-11-22" }));
+    await service.upload(auth);
+    await expect(service.run(now)).rejects.toThrow("战火勋章 2026-11-20");
+    expect(attempted).toEqual(["20", "19", "18"].map(datetime));
+    expect(inserted).toEqual(["19", "18"].map(datetime));
+    await service.run(now);
+    expect(inserted).toEqual(["19", "18", "20"].map(datetime));
+    expect(rows.slice(0, 3).map(row => row.fields.日期)).toEqual(["22", "21", "17"].map(datetime));
+    await service.run(now);
+    expect(launch).toHaveBeenCalledTimes(2);
+  } finally {
+    launch.mockRestore();
+    stub.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", async () => {
   const calls: Array<{path:string,method:string,body:any}> = [];
   let wikiCalls = 0;
@@ -272,6 +338,8 @@ test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", a
     const sink = new A2Base("id","secret","wiki");
     await expect(sink.upsert("万龙觉醒","2026-11-14",parseA2(response))).rejects.toThrow("99991672");
     await sink.upsert("万龙觉醒","2026-11-14",parseA2(response));
+    expect(await sink.upsert("万龙觉醒","2026-11-14",parseA2(response), { createOnly: true })).toBe("already_exists");
+    expect(calls.filter(c => c.method === "PUT" && c.path.includes("/records/")).length).toBe(1);
     expect(await sink.listDailyDates("万龙觉醒")).toEqual(["2026-11-12", "2026-11-14"]);
     expect(await sink.listDailyDates("没有数据表的游戏")).toEqual([]);
     expect(wikiCalls).toBe(2);
