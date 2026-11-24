@@ -77,10 +77,28 @@ function collectionError(error: unknown, fallback: string): string {
   if (/\b(?:TimeoutError|AbortError)\b|Timeout \d+ms exceeded/i.test(message)) return `${fallback}（超时）`;
   return fallback;
 }
+const beijingDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+
 export function a2Dates(now = new Date()) {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const day = beijingDate.format(now);
   const offset = (n: number) => new Date(Date.parse(`${day}T00:00:00+08:00`) - n * 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   return { day, dates: [offset(2), offset(3)] };
+}
+
+function missingDates(existing: readonly string[], through: string) {
+  const dates = new Set(existing);
+  const start = [...dates].sort()[0] ?? through;
+  const first = Date.parse(start);
+  const missing: string[] = [];
+  for (let time = Date.parse(through); time >= first; time -= 86_400_000) {
+    const date = new Date(time).toISOString().slice(0, 10);
+    if (!dates.has(date)) missing.push(date);
+  }
+  return missing;
+}
+
+export function a2Debug(enabled: boolean | undefined, message: string) {
+  if (enabled !== false) console.debug(`[debug] ${message}`);
 }
 export function parseA2(payload: any): { A2: number; other_A2: number } {
   if (payload?.status !== undefined && payload.status !== 0 && payload.status !== "success") throw new Error("云图返回错误，请重新上传登录态");
@@ -100,14 +118,15 @@ async function closeCollectionPage(page: Page | undefined) {
   catch { console.warn("[a2] 无法关闭采集页面，采集浏览器将在本轮结束后关闭"); }
 }
 
-async function openCollectionPage(context: BrowserContext, game: typeof A2_GAMES[number]) {
-  console.debug(`[a2] ${game.name} 正在打开云图人群资产页面`);
+async function openCollectionPage(context: BrowserContext, game: typeof A2_GAMES[number], debug?: boolean) {
+  a2Debug(debug, `[a2] ${game.name} 正在打开云图人群资产页面`);
   const page = await context.newPage();
   try {
     await page.goto(`https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution?aadvid=${game.aid}`, { waitUntil: "domcontentloaded", timeout: 45000 });
     // Let the cloud page initialize its own request middleware.
     await page.waitForTimeout(3000);
     if (new URL(page.url()).pathname.startsWith("/account/login")) throw new A2CollectionError("云图登录未恢复，请重新上传登录态");
+    a2Debug(debug, `[a2] ${game.name} 云图人群资产页面已就绪`);
     return page;
   } catch (error) {
     await closeCollectionPage(page);
@@ -138,7 +157,7 @@ async function load(path: string): Promise<any> {
 // Calls are serialized in this single-process service, including uploads and daily runs.
 export class A2Service {
   private chain: Promise<unknown> = Promise.resolve();
-  constructor(private options: { token: string; dir: string; appId: string; appSecret: string; wikiToken: string; executablePath: string }) {}
+  constructor(private options: { token: string; dir: string; appId: string; appSecret: string; wikiToken: string; executablePath: string; debug?: boolean }) {}
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.chain.then(fn); this.chain = next.catch(() => {}); return next;
   }
@@ -167,113 +186,126 @@ export class A2Service {
   run(now = new Date()) { return this.serial(() => this.collect(now)); }
   private async collect(now: Date) {
     const { day, dates } = a2Dates(now);
+    const through = dates[0]!;
+    const debug = (message: string) => a2Debug(this.options.debug, `[a2] ${message}`);
     const started = performance.now();
     const path = `${this.options.dir}/state.json`;
     const state = await load(path);
-    if (state.completedDay === day) {
-      console.debug(`[a2] ${day} 已完成采集，跳过本次触发`);
+    if (state.completedDay === day && state.coverageThrough === through) {
+      debug(`${day} 已核对并补齐至 ${through}，跳过本次触发`);
       return;
     }
-    console.info(`[a2] 开始采集，运行日期 ${day}，目标数据日期 ${dates.join("、")}`);
-    const parsedAuth = authSchema.safeParse(await load(`${this.options.dir}/auth.json`));
-    if (!parsedAuth.success) {
-      state.lastRunAt = now.toISOString(); state.errors = ["缺少登录态，请通过插件上传"];
-      await atomicJson(path, state);
-      console.error(`[a2] ${state.errors[0]}`);
-      throw new A2CollectionError(state.errors[0]);
-    }
-    const auth = parsedAuth.data;
+    console.info(`[a2] 开始核对并采集，运行日期 ${day}，数据截止 ${through}（T−2）`);
     const errors: string[] = [];
-    let written = 0;
-    let skipped = 0;
-    let browserFailure = "无法启动采集浏览器，请检查 CHROMIUM_PATH";
-    try {
-      const browser = await chromium.launch({ executablePath: this.options.executablePath, headless: true, args: ["--disable-dev-shm-usage", ...(process.env.CHROMIUM_NO_SANDBOX === "true" ? ["--no-sandbox"] : [])] });
+    const sink = new A2Base(this.options.appId, this.options.appSecret, this.options.wikiToken);
+    const plans = new Map<typeof A2_GAMES[number], string[]>();
+    for (const game of A2_GAMES) {
+      debug(`${game.name} 开始分页读取飞书已有日期`);
       try {
-        browserFailure = "无法初始化采集浏览器或载入登录态，请重新上传登录态后再试";
-        const context = await browser.newContext();
-        await context.addCookies(browserCookies(auth.cookies));
-        console.debug(`[a2] 采集浏览器已就绪，已读取 ${auth.requests.length} 款游戏的请求模板`);
-        const sink = new A2Base(this.options.appId, this.options.appSecret, this.options.wikiToken);
-        for (const game of A2_GAMES) {
-          if (state.day === day && dates.every(date => state.done?.includes(`${game.code}:${date}`))) {
-            skipped += dates.length;
-            console.debug(`[a2] ${game.name} 目标日期已写入，跳过`);
-            continue;
-          }
-          let failure = "读取云图 A2 数据失败";
-          let activeDate: string | undefined;
-          let page: Page | undefined;
-          try {
-            const template = auth.requests.find(r => new URL(r.url).searchParams.get("aadvid") === game.aid);
-            if (!template) throw new Error("缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
-            for (const date of dates) {
-              const key = `${game.code}:${date}`;
-              if (state.day === day && state.done?.includes(key)) {
-                skipped++;
-                console.debug(`[a2] ${game.name} ${date} 已写入，跳过`);
-                continue;
-              }
-              activeDate = date;
-              failure = "读取云图 A2 数据失败";
-              const u = new URL(template.url);
-              u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
-              for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
-              if (!u.searchParams.get("brand_id")) throw new Error("捕获请求缺少 brand_id");
-              u.searchParams.set("date", date!.replaceAll("-", ""));
-              let values: ReturnType<typeof parseA2> | undefined;
-              let reason = failure;
-              for (let attempt = 1; attempt <= 3; attempt++) {
-                try {
-                  page ??= await openCollectionPage(context, game);
-                  console.debug(`[a2] ${game.name} ${date} 正在读取云图 A2 数据（第 ${attempt}/3 次）`);
-                  values = await readCloudA2(page, u.href, template.headers);
-                  break;
-                } catch (error) {
-                  reason = collectionError(error, page ? failure : "打开云图人群资产页面失败");
-                  if (page && pageInterruption(error)) {
-                    await closeCollectionPage(page);
-                    page = undefined;
+        const existing = (await sink.listDailyDates(game.name)).filter(date => date <= through);
+        const gaps = missingDates(existing, through);
+        debug(`${game.name} 飞书在截止日期前已有 ${existing.length} 天（${existing[0] ?? "空表"} 至 ${existing.at(-1) ?? "空表"}），待补 ${gaps.length} 天${gaps.length ? `：${gaps.join("、")}` : ""}`);
+        if (gaps.length) plans.set(game, gaps);
+      } catch (error) {
+        const reason = collectionError(error, "读取飞书已有日期失败");
+        errors.push(`${game.name}：${reason}`);
+        console.error(`[a2] ${game.name}：${reason}`);
+      }
+    }
+    let written = 0;
+    if (plans.size > 0) {
+      let browserFailure = "无法启动采集浏览器，请检查 CHROMIUM_PATH";
+      try {
+        debug("开始校验云图登录态");
+        const parsedAuth = authSchema.safeParse(await load(`${this.options.dir}/auth.json`));
+        if (!parsedAuth.success) throw new A2CollectionError("缺少登录态，请通过插件上传");
+        const auth = parsedAuth.data;
+        debug(`登录态格式校验通过，覆盖 ${auth.requests.length}/${A2_GAMES.length} 款游戏，启动采集浏览器`);
+        const browser = await chromium.launch({ executablePath: this.options.executablePath, headless: true, args: ["--disable-dev-shm-usage", ...(process.env.CHROMIUM_NO_SANDBOX === "true" ? ["--no-sandbox"] : [])] });
+        try {
+          browserFailure = "无法初始化采集浏览器或载入登录态，请重新上传登录态后再试";
+          const context = await browser.newContext();
+          await context.addCookies(browserCookies(auth.cookies));
+          debug("采集浏览器已就绪，已载入登录态");
+          for (const [game, plannedDates] of plans) {
+            let failure = "读取云图 A2 数据失败";
+            let activeDate: string | undefined;
+            let page: Page | undefined;
+            try {
+              const template = auth.requests.find(r => new URL(r.url).searchParams.get("aadvid") === game.aid);
+              if (!template) throw new Error("缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
+              for (const date of plannedDates) {
+                const key = `${game.code}:${date}`;
+                activeDate = date;
+                failure = "读取云图 A2 数据失败";
+                const u = new URL(template.url);
+                u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
+                for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
+                if (!u.searchParams.get("brand_id")) throw new Error("捕获请求缺少 brand_id");
+                u.searchParams.set("date", date!.replaceAll("-", ""));
+                let values: ReturnType<typeof parseA2> | undefined;
+                let reason = failure;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                  try {
+                    page ??= await openCollectionPage(context, game, this.options.debug);
+                    debug(`${game.name} ${date} 正在读取云图 A2 数据（第 ${attempt}/3 次）`);
+                    values = await readCloudA2(page, u.href, template.headers);
+                    break;
+                  } catch (error) {
+                    reason = collectionError(error, page ? failure : "打开云图人群资产页面失败");
+                    if (page && pageInterruption(error)) {
+                      debug(`${game.name} ${date} 当前页面失效，将关闭并在下次尝试时重新打开`);
+                      await closeCollectionPage(page);
+                      page = undefined;
+                    }
+                    if (attempt === 3 || reason.startsWith("云图登录未恢复")) break;
+                    debug(`${game.name} ${date} 第 ${attempt}/3 次读取失败：${reason}，等待 ${attempt} 秒后重试`);
+                    await Bun.sleep(1000 * attempt);
                   }
-                  if (attempt === 3 || reason.startsWith("云图登录未恢复")) break;
-                  console.warn(`[a2] ${game.name} ${date} 第 ${attempt}/3 次读取失败：${reason}，即将重试`);
-                  await Bun.sleep(1000 * attempt);
                 }
+                if (!values) {
+                  errors.push(`${game.name} ${date}：${reason}`);
+                  console.error(`[a2] ${game.name} ${date}：${reason}`);
+                  if (reason.startsWith("云图登录未恢复")) break;
+                  continue;
+                }
+                debug(`${game.name} ${date} 云图读取及指标校验通过，开始写入飞书多维表`);
+                failure = "飞书多维表写入失败";
+                await sink.upsert(game.name, date!, values);
+                if (state.day !== day) { state.day = day; state.done = []; }
+                state.done ??= [];
+                if (!state.done.includes(key)) state.done.push(key);
+                failure = "保存采集进度失败";
+                await atomicJson(path, state);
+                written++;
+                debug(`${game.name} ${date} 飞书多维表写入成功，进度已保存`);
               }
-              if (!values) {
-                errors.push(`${game.name} ${date}：${reason}`);
-                console.error(`[a2] ${game.name} ${date}：${reason}`);
-                if (reason.startsWith("云图登录未恢复")) break;
-                continue;
-              }
-              console.debug(`[a2] ${game.name} ${date} 云图读取成功，正在写入飞书多维表`);
-              failure = "飞书多维表写入失败";
-              await sink.upsert(game.name, date!, values);
-              if (state.day !== day) { state.day = day; state.done = []; }
-              state.done ??= []; state.done.push(key);
-              failure = "保存采集进度失败";
-              await atomicJson(path, state);
-              written++;
-              console.info(`[a2] ${game.name} ${date} 飞书多维表写入成功`);
+            } catch (error) {
+              const reason = collectionError(error, failure);
+              errors.push(`${game.name}：${reason}`);
+              console.error(`[a2] ${game.name}${activeDate ? ` ${activeDate}` : ""}：${reason}`);
+            } finally {
+              await closeCollectionPage(page);
             }
-          } catch (error) {
-            const reason = collectionError(error, failure);
-            errors.push(`${game.name}：${reason}`);
-            console.error(`[a2] ${game.name}${activeDate ? ` ${activeDate}` : ""}：${reason}`);
-          } finally {
-            await closeCollectionPage(page);
           }
+          browserFailure = "关闭采集浏览器失败";
+        } finally {
+          debug("关闭采集浏览器");
+          await browser.close();
         }
-        browserFailure = "关闭采集浏览器失败";
-      } finally { await browser.close(); }
-    } catch {
-      errors.push(browserFailure);
-      console.error(`[a2] ${browserFailure}`);
+      } catch (error) {
+        const reason = collectionError(error, browserFailure);
+        errors.push(reason);
+        console.error(`[a2] ${reason}`);
+      }
+    } else {
+      debug("没有待补日期，无需启动云图采集浏览器");
     }
     state.lastRunAt = now.toISOString(); state.errors = errors;
-    if (!errors.length) state.completedDay = day;
+    if (!errors.length) { state.completedDay = day; state.coverageThrough = through; }
+    debug("保存本轮采集状态");
     await atomicJson(path, state);
-    console.info(`[a2] ${day} 采集${errors.length ? "失败" : "完成"}，本次写入 ${written} 条，跳过 ${skipped} 条，失败 ${errors.length} 项，耗时 ${Math.round(performance.now() - started)}ms`);
+    console.info(`[a2] ${day} 采集${errors.length ? "失败" : "完成"}，截止 ${through}，待补 ${[...plans.values()].reduce((count, pending) => count + pending.length, 0)} 条，本次写入 ${written} 条，失败 ${errors.length} 项，耗时 ${Math.round(performance.now() - started)}ms`);
     if (errors.length) throw new A2CollectionError(errors.join("；"));
   }
 }
@@ -294,11 +326,13 @@ export class A2Base {
   }
   private async items(path: string, key: string): Promise<any[]> {
     const items: any[] = []; let cursor = "";
+    const seen = new Set<string>();
     do {
       const result = await this.api(`${path}${path.includes("?") ? "&" : "?"}page_size=100${cursor ? `&page_token=${encodeURIComponent(cursor)}` : ""}`);
       items.push(...result[key] ?? []);
       cursor = result.has_more ? result.page_token : "";
-      if (result.has_more && !cursor) throw new Error("飞书分页缺少游标");
+      if (result.has_more && (!cursor || seen.has(cursor))) throw new Error("飞书分页游标缺失或重复");
+      if (cursor) seen.add(cursor);
     } while (cursor);
     return items;
   }
@@ -320,12 +354,26 @@ export class A2Base {
     }
     return `bitable/v1/apps/${this.base}/tables`;
   }
-  async readDaily(name: string): Promise<Array<{ date: string; A2: number; other_A2: number }>> {
+  private async gameRecords(name: string) {
     const root = await this.baseRoot();
     const table = (await this.items(root, "items")).find(table => table.name === name);
-    if (!table) throw new Error(`${name}暂无 A2 数据表`);
+    return table ? this.items(`${root}/${table.table_id}/records`, "items") : undefined;
+  }
+  async listDailyDates(name: string): Promise<string[]> {
+    const dates = new Set<string>();
+    for (const row of await this.gameRecords(name) ?? []) {
+      const timestamp = row.fields?.["日期"];
+      if (typeof timestamp !== "number") continue;
+      const date = new Date(timestamp);
+      if (!Number.isNaN(date.getTime())) dates.add(beijingDate.format(date));
+    }
+    return [...dates].sort();
+  }
+  async readDaily(name: string): Promise<Array<{ date: string; A2: number; other_A2: number }>> {
+    const rows = await this.gameRecords(name);
+    if (!rows) throw new Error(`${name}暂无 A2 数据表`);
     const index = new Map<string, { date: string; A2: number; other_A2: number }>();
-    for (const row of await this.items(`${root}/${table.table_id}/records`, "items")) {
+    for (const row of rows) {
       if (typeof row.fields?.["日期"] !== "number") continue;
       const date = a2Dates(new Date(row.fields["日期"])).day;
       if (index.has(date)) throw new Error(`${name}的 ${date} 存在重复数据`);

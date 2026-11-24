@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
 import { z } from "zod";
-import { A2Base, A2_GAMES, a2Dates, atomicJson, authSchema, browserCookies, parseA2 } from "./a2-service.ts";
+import { A2Base, A2_GAMES, a2Dates, a2Debug, atomicJson, authSchema, browserCookies, parseA2 } from "./a2-service.ts";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const date = new Date(`${value}T00:00:00Z`);
@@ -34,10 +34,12 @@ export function parseTrend(payload: any, start: string, end: string): A2HistoryR
   }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
-type Options = { dir: string; appId: string; appSecret: string; wikiToken: string; executablePath: string };
+type Options = { dir: string; appId: string; appSecret: string; wikiToken: string; executablePath: string; debug?: boolean };
 export async function backfillA2(options: Options, start: string, end = a2Dates().dates[0]!) {
   if (end > a2Dates().dates[0]!) throw new Error("历史结束日期不能晚于北京时间 T−2");
   const windows = historyWindows(start, end);
+  const debug = (message: string) => a2Debug(options.debug, `[a2-history] ${message}`);
+  debug(`开始历史回填 ${start} 至 ${end}，共 ${windows.length} 个请求窗口`);
   const auth = authSchema.parse(JSON.parse(await readFile(`${options.dir}/auth.json`, "utf8")));
   const folder = `${options.dir}/history/${start}_${end}`;
   const status: any = { start, end, startedAt: new Date().toISOString(), status: "running", counts: {}, errors: [] };
@@ -45,6 +47,7 @@ export async function backfillA2(options: Options, start: string, end = a2Dates(
   await persist();
   let browser;
   try {
+    debug("启动采集浏览器并载入登录态");
     browser = await chromium.launch({ executablePath: options.executablePath, headless: true, args: ["--disable-dev-shm-usage", ...(process.env.CHROMIUM_NO_SANDBOX === "true" ? ["--no-sandbox"] : [])] });
     const context = await browser.newContext();
     await context.addCookies(browserCookies(auth.cookies));
@@ -59,13 +62,16 @@ export async function backfillA2(options: Options, start: string, end = a2Dates(
         const cachePath = `${folder}/${game.code}.json`;
         try { cache = JSON.parse(await readFile(cachePath, "utf8")); } catch (error: any) { if (error.code !== "ENOENT") throw error; }
         const points = new Map(cache.rows.map(row => [row.date, row]));
+        debug(`${game.name} 已读取历史缓存，覆盖 ${cache.windows.length}/${windows.length} 个窗口`);
         if (windows.some(window => !cache.windows.includes(window.end))) {
+          debug(`${game.name} 正在打开云图人群资产页面`);
           page = await context.newPage();
           await page.goto(`https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution?aadvid=${game.aid}`, { waitUntil: "domcontentloaded", timeout: 45000 });
           await page.waitForTimeout(4000);
           if (new URL(page.url()).pathname.startsWith("/account/login")) throw new Error("登录态失效");
           for (const window of windows) {
             if (cache.windows.includes(window.end)) continue;
+            debug(`${game.name} 请求 ${window.start} 至 ${window.end} 的历史趋势`);
             const u = new URL(template.url);
             u.pathname = "/yuntu_ng/api/v1/get_audience_asset_trend";
             for (const key of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(key)) u.searchParams.delete(key);
@@ -81,11 +87,12 @@ export async function backfillA2(options: Options, start: string, end = a2Dates(
             cache.rows = [...points.values()].sort((a, b) => a.date.localeCompare(b.date)); cache.windows.push(window.end);
             await atomicJson(cachePath, cache);
             status.counts[game.code] = { fetched: cache.rows.length }; await persist();
-            console.info(`[a2-history] ${game.name} 已采集 ${window.start} ~ ${window.end}，累计 ${cache.rows.length} 天`);
+            debug(`${game.name} 已校验并缓存 ${window.start} 至 ${window.end}，累计 ${cache.rows.length} 天`);
           }
         }
         const expected = Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
         if (cache.rows.length !== expected) throw new Error("缓存日期数量不完整");
+        debug(`${game.name} 正在向飞书写入并读回核验 ${cache.rows.length} 天`);
         const result = await sink.upsertMany(game.name, cache.rows);
         status.counts[game.code] = { fetched: cache.rows.length, ...result }; await persist();
         console.info(`[a2-history] ${game.name} 飞书核验通过 ${result.verified} 天`);

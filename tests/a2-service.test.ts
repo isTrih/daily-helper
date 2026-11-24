@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { chromium } from "playwright-core";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { A2Base, A2Service, A2_GAMES, a2Dates, browserCookies, authSchema, parseA2 } from "../src/a2-service.ts";
@@ -24,7 +24,7 @@ test("登录态仅允许云图只读接口及 Oceanengine cookies", () => {
   expect(authSchema.safeParse({...auth, cookies:[{...cookie,domain:"evil-oceanengine.com"}]}).success).toBe(false);
   expect(authSchema.safeParse({...auth, requests:[{url:"https://example.com/api"}]}).success).toBe(false);
 });
-test("五游戏十行、并发及重启去重、次日再次回补", async () => {
+test("五游戏缺口、并发及重启去重、次日只补新增缺口", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-test-"));
   const rows: unknown[] = []; const urls: string[] = []; let attempts = 0;
   const launch = spyOn(chromium, "launch").mockResolvedValue({
@@ -33,7 +33,12 @@ test("五游戏十行、并发及重启去重、次日再次回补", async () =>
       evaluate: async (_fn: unknown, request: {url: string}) => { urls.push(request.url); if (attempts++ === 0) throw Error("transient read failure"); return response; },
     }) }), close: async () => {},
   } as never);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (...row) => { rows.push(row); });
+  const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (...row) => {
+    rows.push(row);
+    tableDates.get(row[0])!.push(row[1]);
+  });
   const options = { token: "test", dir, appId:"test", appSecret:"test", wikiToken:"test", executablePath:"test" };
   try {
     const service = new A2Service(options); await service.upload(auth);
@@ -41,16 +46,22 @@ test("五游戏十行、并发及重启去重、次日再次回补", async () =>
     await Promise.all([service.run(now), service.run(now)]);
     expect(rows.length).toBe(10);
     await new A2Service(options).run(now); expect(rows.length).toBe(10);
-    await service.run(new Date("2026-11-17T01:00:00Z")); expect(rows.length).toBe(20); expect(attempts).toBe(21);
+    await service.run(new Date("2026-11-17T01:00:00Z")); expect(rows.length).toBe(15); expect(attempts).toBe(16);
     expect(urls.every(u => !u.includes("_signature") && !u.includes("X-Bogus"))).toBe(true);
     expect(rows[0]).toEqual(["战火勋章", "2026-11-14", { A2:2633119, other_A2:10395316 }]);
-  } finally { launch.mockRestore(); upsert.mockRestore(); await rm(dir,{recursive:true,force:true}); }
+  } finally { launch.mockRestore(); upsert.mockRestore(); listDates.mockRestore(); await rm(dir,{recursive:true,force:true}); }
 });
 test("部分失败只重试未完成游戏，缺登录态记录可查看状态", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-retry-"));
   const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async()=>response})}),close:async()=>{} } as never);
   let fail = true; let count = 0;
-  const upsert = spyOn(A2Base.prototype,"upsert").mockImplementation(async name => { if(fail && name === "万龙觉醒") throw Error("sensitive-fixture"); count++; });
+  const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
+  const upsert = spyOn(A2Base.prototype,"upsert").mockImplementation(async (name, date) => {
+    if(fail && name === "万龙觉醒") throw Error("sensitive-fixture");
+    tableDates.get(name)!.push(date);
+    count++;
+  });
   try {
     const service = new A2Service({token:"test",dir,appId:"test",appSecret:"test",wikiToken:"test",executablePath:"test"});
     const now = new Date("2026-11-16T01:00:00Z");
@@ -62,10 +73,11 @@ test("部分失败只重试未完成游戏，缺登录态记录可查看状态",
     expect(count).toBe(8);
     fail=false; await service.run(now); expect(count).toBe(10);
     expect((await service.status()).completedDay).toBe("2026-11-16");
-  } finally {launch.mockRestore();upsert.mockRestore();await rm(dir,{recursive:true,force:true});}
+  } finally {launch.mockRestore();upsert.mockRestore();listDates.mockRestore();await rm(dir,{recursive:true,force:true});}
 });
 test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-auth-status-"));
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockResolvedValue([]);
   const launch = spyOn(chromium, "launch").mockResolvedValue({
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
@@ -80,11 +92,13 @@ test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () =
     expect((await service.status()).errors).toContain("小冰冰传奇：缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
   } finally {
     launch.mockRestore();
+    listDates.mockRestore();
     await rm(dir, { recursive: true, force: true });
   }
 });
 test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏的另一天", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-browser-recovery-"));
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockResolvedValue(["2026-11-19"]);
   const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
   const writes: string[] = [];
   let pageCount = 0;
@@ -122,7 +136,57 @@ test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏�
   } finally {
     upsert.mockRestore();
     launch.mockRestore();
+    listDates.mockRestore();
     sleep.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略旧版完成标记", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "a2-gaps-"));
+  const tableDates = new Map<string, string[]>([
+    ["战火勋章", ["2026-11-18", "2026-11-20", "2026-11-23"]],
+    ["小冰冰传奇", ["2026-11-20", "2026-11-22"]],
+    ["万国觉醒", []],
+    ["万龙觉醒", ["2026-11-22"]],
+    ["塔塔冒险队", ["2026-11-22"]],
+  ]);
+  const requests: string[] = [];
+  const writes: string[] = [];
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
+  const debug = spyOn(console, "debug").mockImplementation(() => {});
+  const launch = spyOn(chromium, "launch").mockResolvedValue({
+    newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
+      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
+      evaluate: async (_fn: unknown, input: {url: string}) => { requests.push(new URL(input.url).searchParams.get("date")!); return response; },
+    }) }), close: async () => {},
+  } as never);
+  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (name, date) => { writes.push(`${name}:${date}`); });
+  const options = { token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" };
+  const now = new Date("2026-11-23T16:00:01Z");
+  try {
+    await writeFile(join(dir, "state.json"), JSON.stringify({ day: "2026-11-24", done: ["w:2026-11-22"], completedDay: "2026-11-24" }));
+    const service = new A2Service(options);
+    await service.upload(auth);
+    await service.run(now);
+    expect(requests).toEqual(["20261122", "20261121", "20261119", "20261121", "20261122"]);
+    expect(writes).toEqual([
+      "战火勋章:2026-11-22", "战火勋章:2026-11-21", "战火勋章:2026-11-19", "小冰冰传奇:2026-11-21", "万国觉醒:2026-11-22",
+    ]);
+    expect((await service.status()).coverageThrough).toBe("2026-11-22");
+    expect(debug.mock.calls.some(([line]) => String(line).includes("待补 3 天：2026-11-22、2026-11-21、2026-11-19"))).toBe(true);
+    expect(debug.mock.calls.every(([line]) => String(line).startsWith("[debug]"))).toBe(true);
+    debug.mockClear();
+    for (const name of tableDates.keys()) tableDates.set(name, ["2026-11-23"]);
+    await new A2Service({ ...options, debug: false }).run(new Date("2026-11-24T16:00:01Z"));
+    expect(debug.mock.calls).toHaveLength(0);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(listDates).toHaveBeenCalledTimes(10);
+  } finally {
+    upsert.mockRestore();
+    launch.mockRestore();
+    listDates.mockRestore();
+    debug.mockRestore();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -140,7 +204,7 @@ test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", a
     }
     else if(u.pathname.endsWith("/tables")) data={items:[{name:"万龙觉醒",table_id:"table"}],has_more:false};
     else if(u.pathname.endsWith("/fields")) data=init?.method==="POST" ? {} : {items:[{field_name:"日期",type:5},{field_name:"A2",type:2}],has_more:false};
-    else if(u.pathname.endsWith("/records") && !u.searchParams.has("page_token")) data={items:[],has_more:true,page_token:"second"};
+    else if(u.pathname.endsWith("/records") && !u.searchParams.has("page_token")) data={items:[{fields:{日期:Date.parse("2026-11-12T00:00:00+08:00")}}],has_more:true,page_token:"second"};
     else if(u.pathname.endsWith("/records")) data={items:[{record_id:"row",fields:{日期:Date.parse("2026-11-14T00:00:00+08:00")}}],has_more:false};
     return Response.json({code:0,data});
   }) as typeof fetch);
@@ -148,6 +212,8 @@ test("飞书按日期更新已有行并创建 other_A2 列，分页不丢行", a
     const sink = new A2Base("id","secret","wiki");
     await expect(sink.upsert("万龙觉醒","2026-11-14",parseA2(response))).rejects.toThrow("99991672");
     await sink.upsert("万龙觉醒","2026-11-14",parseA2(response));
+    expect(await sink.listDailyDates("万龙觉醒")).toEqual(["2026-11-12", "2026-11-14"]);
+    expect(await sink.listDailyDates("没有数据表的游戏")).toEqual([]);
     expect(wikiCalls).toBe(2);
     expect(calls.find(c=>c.method==="PUT"&&c.path.includes("/records/"))?.body.fields).toEqual({日期:1794585600000,A2:2633119,other_A2:10395316,游戏:"万龙觉醒"});
     expect(calls.some(c=>c.method==="POST"&&c.body?.field_name==="other_A2")).toBe(true);
