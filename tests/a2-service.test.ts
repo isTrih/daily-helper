@@ -9,6 +9,18 @@ const response = { status: 0, data: { profile: [{ title: "a2", cover_num: "26331
 const cookie = { name: "test", value: "fixture", domain: ".oceanengine.com", path: "/", secure: true, httpOnly: true, expires: -1, sameSite: "Lax" as const };
 const auth = { cookies: [cookie], requests: A2_GAMES.map(game => ({ url: `https://yuntu.oceanengine.com/yuntu_ng/api/v1/get_audience_asset_profile?aadvid=${game.aid}&brand_id=123&industry_id=22` })) };
 const pageEvents = { on() {}, off() {} };
+
+function trendPayload(request: { url: string }, days = 2) {
+  const url = new URL(request.url);
+  expect(url.pathname).toBe("/yuntu_ng/api/v1/get_audience_asset_trend");
+  expect(url.searchParams.get("card")).toBe("2");
+  expect(url.searchParams.get("benchmark")).toBe("1");
+  const date = url.searchParams.get("date")!;
+  const end = Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}T00:00:00Z`);
+  return { status: 0, data: { trend_points: Array.from({ length: days }, (_, offset) => ({
+    ...response.data.profile[0]!, date: new Date(end - offset * 86_400_000).toISOString().slice(0, 10),
+  })) } };
+}
 test("北京时间跨月 T-2/T-3", () => {
   expect(a2Dates(new Date("2026-11-30T16:01:00Z"))).toEqual({ day: "2026-12-01", dates: ["2026-11-29", "2026-11-28"] });
 });
@@ -78,15 +90,17 @@ test("五游戏缺口、并发及重启去重、次日只补新增缺口", async
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
       ...pageEvents,
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution", goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
-      evaluate: async (_fn: unknown, request: {url: string}) => { urls.push(request.url); if (attempts++ === 0) throw Error("transient read failure"); return response; },
+      evaluate: async (_fn: unknown, request: {url: string}) => { urls.push(request.url); if (attempts++ === 0) throw Error("transient read failure"); return trendPayload(request); },
     }) }), close: async () => {},
   } as never);
   const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (game, date, values) => {
-    rows.push([game, date, values]);
-    tableDates.get(game)!.push(date);
-    return "created";
+  const upsert = spyOn(A2Base.prototype, "upsertMany").mockImplementation(async (game, batch) => {
+    for (const { date, ...values } of batch) {
+      rows.push([game, date, values]);
+      tableDates.get(game)!.push(date);
+    }
+    return { created: batch.length, updated: 0, verified: batch.length };
   });
   const options = { token: "test", dir, appId:"test", appSecret:"test", wikiToken:"test", executablePath:"test" };
   try {
@@ -95,22 +109,22 @@ test("五游戏缺口、并发及重启去重、次日只补新增缺口", async
     await Promise.all([service.run(now), service.run(now)]);
     expect(rows.length).toBe(10);
     await new A2Service(options).run(now); expect(rows.length).toBe(10);
-    await service.run(new Date("2026-11-17T01:00:00Z")); expect(rows.length).toBe(15); expect(attempts).toBe(16);
+    await service.run(new Date("2026-11-17T01:00:00Z")); expect(rows.length).toBe(15); expect(attempts).toBe(11);
     expect(urls.every(u => !u.includes("_signature") && !u.includes("X-Bogus"))).toBe(true);
     expect(rows[0]).toEqual(["战火勋章", "2026-11-14", { A2:2633119, other_A2:10395316 }]);
   } finally { launch.mockRestore(); upsert.mockRestore(); listDates.mockRestore(); await rm(dir,{recursive:true,force:true}); }
 });
 test("部分失败只重试未完成游戏，缺登录态记录可查看状态", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-retry-"));
-  const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({...pageEvents,url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async()=>response})}),close:async()=>{} } as never);
+  const launch = spyOn(chromium, "launch").mockResolvedValue({ newContext:async () => ({addCookies:async()=>{},newPage:async()=>({...pageEvents,url:()=>"https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",goto:async()=>{},waitForTimeout:async()=>{},close:async()=>{},evaluate:async(_fn: unknown, request: {url: string})=>trendPayload(request)})}),close:async()=>{} } as never);
   let fail = true; let count = 0;
   const tableDates = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-12"]]));
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tableDates.get(name)!);
-  const upsert = spyOn(A2Base.prototype,"upsert").mockImplementation(async (name, date) => {
+  const upsert = spyOn(A2Base.prototype,"upsertMany").mockImplementation(async (name, batch) => {
     if(fail && name === "万龙觉醒") throw Error("sensitive-fixture");
-    tableDates.get(name)!.push(date);
-    count++;
-    return "created";
+    tableDates.get(name)!.push(...batch.map(row => row.date));
+    count += batch.length;
+    return { created: batch.length, updated: 0, verified: batch.length };
   });
   try {
     const service = new A2Service({token:"test",dir,appId:"test",appSecret:"test",wikiToken:"test",executablePath:"test"});
@@ -118,8 +132,8 @@ test("部分失败只重试未完成游戏，缺登录态记录可查看状态",
     await expect(service.run(now)).rejects.toThrow("缺少登录态");
     expect((await service.status()).errors).toHaveLength(1);
     await service.upload(auth);
-    await expect(service.run(now)).rejects.toThrow("万龙觉醒 2026-11-14：飞书多维表写入失败");
-    expect((await service.status()).errors).toEqual(["万龙觉醒 2026-11-14：飞书多维表写入失败", "万龙觉醒 2026-11-13：飞书多维表写入失败"]);
+    await expect(service.run(now)).rejects.toThrow("万龙觉醒 截至 2026-11-14 的趋势窗口：飞书多维表批量写入失败");
+    expect((await service.status()).errors).toEqual(["万龙觉醒 截至 2026-11-14 的趋势窗口：飞书多维表批量写入失败"]);
     expect(count).toBe(8);
     fail=false; await service.run(now); expect(count).toBe(10);
     expect((await service.status()).completedDay).toBe("2026-11-16");
@@ -147,7 +161,7 @@ test("采集状态区分云图 HTTP 401 和未捕获的游戏模板", async () =
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏的另一天", async () => {
+test("失效页面会重开重试趋势，响应缺一天时仍写同窗口的其他日期", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-browser-recovery-"));
   const listDates = spyOn(A2Base.prototype, "listDailyDates").mockResolvedValue(["2026-11-19"]);
   const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
@@ -165,26 +179,30 @@ test("失效页面会重开，单日读取耗尽重试后仍处理同一游戏�
         waitForTimeout: async () => { if (closed) throw Error("Target page, context or browser has been closed"); },
         close: async () => { closed = true; },
         evaluate: async (_fn: unknown, request: {url: string}) => {
-          if (new URL(request.url).searchParams.get("date") !== "20261121") return response;
           firstDateAttempts++;
           if (pageNumber === 1) {
             closed = true;
             throw Error("Target page, context or browser has been closed");
           }
-          throw Error("page.evaluate: TypeError: Failed to fetch");
+          const trend = trendPayload(request);
+          trend.data.trend_points.shift();
+          return trend;
         },
       };
     }}), close: async () => {},
   } as never);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (_name, date) => { writes.push(date); return "created"; });
+  const upsert = spyOn(A2Base.prototype, "upsertMany").mockImplementation(async (_name, batch) => {
+    writes.push(...batch.map(row => row.date));
+    return { created: batch.length, updated: 0, verified: batch.length };
+  });
   try {
     const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" });
     await service.upload({ ...auth, requests: auth.requests.slice(0, 1) });
     await expect(service.run(new Date("2026-11-23T11:00:00Z"))).rejects.toThrow();
     expect(pageCount).toBe(2);
-    expect(firstDateAttempts).toBe(3);
+    expect(firstDateAttempts).toBe(2);
     expect(writes).toEqual(["2026-11-20"]);
-    expect((await service.status()).errors[0]).toContain("云图网络请求失败");
+    expect((await service.status()).errors[0]).toContain("云图历史缺少日期 2026-11-21");
   } finally {
     upsert.mockRestore();
     launch.mockRestore();
@@ -211,10 +229,20 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
       ...pageEvents,
       url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
       goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
-      evaluate: async (_fn: unknown, input: {url: string}) => { requests.push(new URL(input.url).searchParams.get("date")!); return response; },
+      evaluate: async (_fn: unknown, input: {url: string}) => {
+        const params = new URL(input.url).searchParams;
+        const end = params.get("date")!;
+        requests.push(end);
+        const game = A2_GAMES.find(game => game.aid === params.get("aadvid"))?.code;
+        const days = game === "w" ? (end === "20261122" ? 5 : 3) : game === "d1" && end === "20261122" ? 3 : 1;
+        return trendPayload(input, days);
+      },
     }) }), close: async () => {},
   } as never);
-  const upsert = spyOn(A2Base.prototype, "upsert").mockImplementation(async (name, date) => { writes.push(`${name}:${date}`); return "created"; });
+  const upsert = spyOn(A2Base.prototype, "upsertMany").mockImplementation(async (name, batch) => {
+    writes.push(...batch.map(row => `${name}:${row.date}`));
+    return { created: batch.length, updated: 0, verified: batch.length };
+  });
   const options = { token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test" };
   const now = new Date("2026-11-23T16:00:01Z");
   try {
@@ -222,7 +250,7 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
     const service = new A2Service(options);
     await service.upload(auth);
     await service.run(now);
-    expect(requests).toEqual(["20261122", "20261121", "20261119", "20261121", "20261122"]);
+    expect(requests).toEqual(Array(5).fill("20261122"));
     expect(writes).toEqual([
       "战火勋章:2026-11-22", "战火勋章:2026-11-21", "战火勋章:2026-11-19", "小冰冰传奇:2026-11-21", "万国觉醒:2026-11-22",
     ]);
@@ -235,12 +263,13 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
     for (const name of tableDates.keys()) tableDates.set(name, ["2026-11-23"]);
     await new A2Service({ ...options, debug: false }).run(new Date("2026-11-24T16:00:01Z"));
     expect(debug.mock.calls).toHaveLength(0);
-    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledTimes(2);
     expect(listDates).toHaveBeenCalledTimes(10);
     for (const name of tableDates.keys()) tableDates.set(name, ["2026-11-22", "2026-11-23"]);
     tableDates.set("战火勋章", ["2026-11-21", "2026-11-23"]);
+    const beforeManual = writes.length;
     await service.run(new Date("2026-11-24T16:00:01Z"), { refreshLatest: true });
-    expect(writes.slice(5)).toEqual([
+    expect(writes.slice(beforeManual)).toEqual([
       "战火勋章:2026-11-23", "战火勋章:2026-11-22", "小冰冰传奇:2026-11-23",
       "万国觉醒:2026-11-23", "万龙觉醒:2026-11-23", "塔塔冒险队:2026-11-23",
     ]);
@@ -252,10 +281,11 @@ test("北京时间 11/24 截止 11/22，按各游戏飞书日期补缺并忽略�
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 日", async () => {
+test("飞书表顺序为 22、21、17 日时批量新增 20、19、18 日，部分写入后只补缺口", async () => {
   const dir = await mkdtemp(join(tmpdir(), "a2-unordered-dates-"));
   const datetime = (day: string) => Date.parse(`2026-11-${day}T00:00:00+08:00`);
-  const rows = ["22", "21", "17"].map(day => ({ record_id: `row-${day}`, fields: { 日期: datetime(day) } }));
+  const rows: Array<{ record_id: string; fields: { 日期: number; A2?: number; other_A2?: number; 游戏?: string } }> =
+    ["22", "21", "17"].map(day => ({ record_id: `row-${day}`, fields: { 日期: datetime(day) } }));
   const inserted: number[] = [];
   const attempted: number[] = [];
   let failFirst = true;
@@ -273,12 +303,14 @@ test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 �
       ];
       return Response.json({ code: 0, data: { items, has_more: false } });
     }
-    if (path.endsWith("/w/records") && method === "POST") {
-      const value = JSON.parse(String(init?.body)).fields.日期 as number;
-      attempted.push(value);
+    if (path.endsWith("/w/records/batch_create") && method === "POST") {
+      const batch = JSON.parse(String(init?.body)).records as Array<{ fields: typeof rows[number]["fields"] }>;
+      attempted.push(...batch.map(row => row.fields.日期));
+      for (const { fields } of failFirst ? batch.slice(1) : batch) {
+        inserted.push(fields.日期);
+        rows.push({ record_id: `new-${fields.日期}`, fields });
+      }
       if (failFirst) { failFirst = false; return Response.json({ code: 503 }, { status: 503 }); }
-      inserted.push(value);
-      rows.push({ record_id: `new-${value}`, fields: { 日期: value } });
       return Response.json({ code: 0, data: {} });
     }
     if (path.endsWith("/w/records") && method === "GET") {
@@ -293,7 +325,9 @@ test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 �
   const launch = spyOn(chromium, "launch").mockResolvedValue({
     newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
       ...pageEvents, url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
-      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {}, evaluate: async () => response,
+      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
+      evaluate: async (_fn: unknown, request: { url: string }) =>
+        trendPayload(request, new URL(request.url).searchParams.get("aadvid") === A2_GAMES[0].aid ? 6 : 1),
     }) }), close: async () => {},
   } as never);
   try {
@@ -301,7 +335,7 @@ test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 �
     const now = new Date("2026-11-24T04:00:00Z");
     await writeFile(join(dir, "state.json"), JSON.stringify({ completedDay: "2026-11-24", coverageThrough: "2026-11-22" }));
     await service.upload(auth);
-    await expect(service.run(now)).rejects.toThrow("战火勋章 2026-11-20");
+    await expect(service.run(now)).rejects.toThrow("战火勋章 截至 2026-11-22 的趋势窗口");
     expect(attempted).toEqual(["20", "19", "18"].map(datetime));
     expect(inserted).toEqual(["19", "18"].map(datetime));
     await service.run(now);
@@ -312,6 +346,53 @@ test("飞书表顺序为 22、21、17 日时同日重查并新增 20、19、18 �
   } finally {
     launch.mockRestore();
     stub.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("11/26 每日采集只按游戏请求截至 11/24 的趋势，补上响应里的全部有效日期", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "a2-full-trend-"));
+  const tables = new Map<string, string[]>(A2_GAMES.map(game => [game.name, ["2026-11-21", "2026-11-24"]]));
+  tables.set("塔塔冒险队", []);
+  const requests: string[] = [];
+  const listDates = spyOn(A2Base.prototype, "listDailyDates").mockImplementation(async name => tables.get(name)!);
+  const upsert = spyOn(A2Base.prototype, "upsertMany").mockImplementation(async (name, batch) => {
+    tables.get(name)!.push(...batch.map(row => row.date));
+    return { created: batch.length, updated: 0, verified: batch.length };
+  });
+  const launch = spyOn(chromium, "launch").mockResolvedValue({
+    newContext: async () => ({ addCookies: async () => {}, newPage: async () => ({
+      ...pageEvents, url: () => "https://yuntu.oceanengine.com/yuntu_brand/game/assets/crowd/distribution",
+      goto: async () => {}, waitForTimeout: async () => {}, close: async () => {},
+      evaluate: async (_fn: unknown, input: { url: string }) => {
+        requests.push(new URL(input.url).searchParams.get("date")!);
+        return trendPayload(input, 55);
+      },
+    }) }), close: async () => {},
+  } as never);
+  try {
+    const service = new A2Service({ token: "test", dir, appId: "test", appSecret: "test", wikiToken: "test", executablePath: "test", debug: false });
+    const now = new Date("2026-11-26T02:00:00Z");
+    await service.upload(auth);
+    await service.run(now);
+    expect(requests).toEqual(Array(5).fill("20261124"));
+    expect(upsert).toHaveBeenCalledTimes(5);
+    for (const [game, rows, options] of upsert.mock.calls) {
+      const empty = game === "塔塔冒险队";
+      expect(rows).toHaveLength(empty ? 55 : 53);
+      expect(rows.at(-1)?.date).toBe("2026-10-01");
+      expect(rows.some(row => row.date === "2026-11-24" || row.date === "2026-11-21")).toBe(empty);
+      expect(options?.updateDates).toEqual([]);
+    }
+    await service.run(now);
+    expect(requests).toHaveLength(5);
+    await service.run(new Date("2026-11-27T02:00:00Z"));
+    expect(requests.slice(5)).toEqual(Array(5).fill("20261125"));
+    expect(upsert.mock.calls.slice(5).every(([, rows]) => rows.length === 1 && rows[0]?.date === "2026-11-25")).toBe(true);
+  } finally {
+    launch.mockRestore();
+    upsert.mockRestore();
+    listDates.mockRestore();
     await rm(dir, { recursive: true, force: true });
   }
 });

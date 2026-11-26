@@ -83,6 +83,7 @@ function collectionError(error: unknown, fallback: string): string {
     ? "飞书应用缺少接口权限（99991672），请检查 Wiki 与多维表格权限"
     : `飞书接口错误（${feishu[1]}）`;
   if (/^云图返回错误（业务状态 -?\d+）$/.test(message) ||
+      /^云图历史(?:缺少日期 \d{4}-\d{2}-\d{2}，不会补零|日期重复：\d{4}-\d{2}-\d{2}|趋势返回错误)$/.test(message) ||
       /^云图缺少有效 A2 数值（(?:profile|A2|other_A2)）$/.test(message) ||
       message === "缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传" ||
       message === "云图登录未恢复，请重新上传登录态" ||
@@ -109,6 +110,8 @@ function failureCode(error: unknown, reason: string) {
   if (/HTTP \d{3}/.test(reason)) return "http_error";
   if (reason.includes("网络请求失败")) return "network_error";
   if (reason.includes("JSON")) return "invalid_json";
+  if (reason.includes("历史缺少日期")) return "missing_trend_date";
+  if (reason.includes("历史日期重复")) return "duplicate_trend_date";
   if (/缺少有效 A2|超出整数范围/.test(reason)) return "invalid_metrics";
   if (reason.includes("云图返回错误")) return "upstream_rejected";
   if (/飞书.*(?:错误|权限)/.test(reason)) return "feishu_api_error";
@@ -126,9 +129,8 @@ export function a2Dates(now = new Date()) {
   return { day, dates: [offset(2), offset(3)] };
 }
 
-function missingDates(existing: readonly string[], through: string) {
+function missingDates(existing: readonly string[], through: string, start = [...existing].sort()[0] ?? through) {
   const dates = new Set(existing);
-  const start = [...dates].sort()[0] ?? through;
   const first = Date.parse(start);
   const missing: string[] = [];
   for (let time = Date.parse(through); time >= first; time -= 86_400_000) {
@@ -203,7 +205,8 @@ function watchCloudRequest(page: Page, url: string) {
   const matches = (request: BrowserRequest) => {
     const observed = new URL(request.url());
     return observed.origin === target.origin && observed.pathname === target.pathname &&
-      ["aadvid", "brand_id", "date"].every(key => observed.searchParams.get(key) === target.searchParams.get(key));
+      ["aadvid", "brand_id", "industry_id", "date", "card", "benchmark"]
+        .every(key => observed.searchParams.get(key) === target.searchParams.get(key));
   };
   const onRequest = (request: BrowserRequest) => {
     if (matches(request)) details.requests++;
@@ -306,9 +309,11 @@ export class A2Service {
       debug(`${day} 有完成记录，本次仍以飞书现有日期核对缺口`);
     }
     trace.info(`stage=start mode=${refreshLatest ? "manual_refresh" : "daily"} day=${day} through=${through} 开始采集`);
+    const { indexTrendPoints, readTrendPoint, trendRequestUrl, trendWindowsForDates, trendWindowStart } = await import("./a2-history.ts");
+    const latestWindowStart = trendWindowStart(through);
     const errors: string[] = [];
     const sink = new A2Base(this.options.appId, this.options.appSecret, this.options.wikiToken);
-    const plans = new Map<typeof A2_GAMES[number], string[]>();
+    const plans = new Map<typeof A2_GAMES[number], { existing: Set<string>; pending: string[] }>();
     for (const game of A2_GAMES) {
       const scope = `stage=feishu_dates game=${game.code}`;
       const stageStarted = performance.now();
@@ -316,9 +321,11 @@ export class A2Service {
       try {
         const existing = (await sink.listDailyDates(game.name)).filter(date => date <= through);
         const gaps = missingDates(existing, through);
-        const pending = refreshLatest && gaps[0] !== through ? [through, ...gaps] : gaps;
-        debug(`${scope} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 飞书在截止日期及以前已有 ${existing.length} 天（${existing[0] ?? "空表"} 至 ${existing.at(-1) ?? "空表"}），待${refreshLatest ? "采集" : "补"} ${pending.length} 天${pending.length ? `：${pending.join("、")}` : ""}`);
-        if (pending.length) plans.set(game, pending);
+        const latestChecked = state.trendCheckedThrough?.[game.code] === through;
+        const needsLatest = refreshLatest || !latestChecked || gaps.some(date => date >= latestWindowStart);
+        const pending = needsLatest && gaps[0] !== through ? [through, ...gaps] : gaps;
+        debug(`${scope} duration_ms=${Math.round(performance.now() - stageStarted)} latest_window=${needsLatest ? through : "already_checked"} ${game.name} 飞书在截止日期及以前已有 ${existing.length} 天（${existing[0] ?? "空表"} 至 ${existing.at(-1) ?? "空表"}），待补 ${gaps.length} 天${gaps.length ? `：${gaps.join("、")}` : ""}`);
+        if (pending.length) plans.set(game, { existing: new Set(existing), pending });
       } catch (error) {
         const reason = collectionError(error, "读取飞书已有日期失败");
         errors.push(`${game.name}：${reason}`);
@@ -344,91 +351,105 @@ export class A2Service {
           const context = await browser.newContext();
           await context.addCookies(browserCookies(auth.cookies));
           debug("采集浏览器已就绪，已载入登录态");
-          for (const [game, plannedDates] of plans) {
-            let stage = "template";
-            let stageStarted = performance.now();
-            let failure = "读取云图 A2 数据失败";
-            let activeDate: string | undefined;
+          for (const [game, { existing, pending }] of plans) {
             let page: Page | undefined;
             try {
               const template = auth.requests.find(r => new URL(r.url).searchParams.get("aadvid") === game.aid);
-              if (!template) throw new Error("缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传");
-              for (const date of plannedDates) {
-                const key = `${game.code}:${date}`;
-                activeDate = date;
-                const scope = `game=${game.code} date=${date}`;
-                stage = "cloud_request";
-                stageStarted = performance.now();
-                failure = "读取云图 A2 数据失败";
-                const u = new URL(template.url);
-                u.pathname = "/yuntu_ng/api/v1/get_audience_asset_profile";
-                for (const k of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(k)) u.searchParams.delete(k);
-                if (!u.searchParams.get("brand_id")) throw new Error("捕获请求缺少 brand_id");
-                u.searchParams.set("date", date!.replaceAll("-", ""));
-                let values: ReturnType<typeof parseA2> | undefined;
-                let reason = failure;
+              if (!template) {
+                const reason = "缺少游戏请求模板，请访问该游戏的云图人群资产页并重新上传";
+                errors.push(`${game.name}：${reason}`);
+                trace.error(`stage=template game=${game.code} code=template_missing ${game.name}：${reason}`);
+                continue;
+              }
+              for (const window of trendWindowsForDates(pending)) {
+                const scope = `game=${game.code} from=${trendWindowStart(window.end)} through=${window.end}`;
+                const url = trendRequestUrl(template.url, window.end);
+                let points: ReturnType<typeof indexTrendPoints> | undefined;
+                let reason = "";
                 let diagnostics = "";
                 for (let attempt = 1; attempt <= 3; attempt++) {
                   let attemptStarted = performance.now();
                   let network = "";
-                  stage = page ? "cloud_request" : "navigation";
+                  let stage = page ? "cloud_request" : "navigation";
                   try {
                     page ??= await openCollectionPage(context, game, trace);
                     stage = "cloud_request";
                     attemptStarted = performance.now();
-                    debug(`stage=${stage} ${scope} attempt=${attempt}/3 timeout_ms=${A2_CLOUD_TIMEOUT_MS} ${game.name} 正在读取云图 A2 数据`);
-                    const payload = await readA2CloudJson(page, u.href, template.headers, details => { network = details; });
+                    debug(`stage=${stage} ${scope} attempt=${attempt}/3 timeout_ms=${A2_CLOUD_TIMEOUT_MS} ${game.name} 请求云图趋势窗口`);
+                    const payload = await readA2CloudJson(page, url, template.headers, details => { network = details; });
                     stage = "cloud_metrics";
-                    values = parseA2(payload);
-                    debug(`stage=${stage} ${scope} attempt=${attempt}/3 duration_ms=${Math.round(performance.now() - attemptStarted)} ${network} ${game.name} 读取成功`);
+                    const received = indexTrendPoints(payload, trendWindowStart(window.end), window.end);
+                    if (!received.size) throw new Error("云图历史趋势返回错误");
+                    points = received;
+                    debug(`stage=${stage} ${scope} attempt=${attempt}/3 received_dates=${points.size} duration_ms=${Math.round(performance.now() - attemptStarted)} ${network} ${game.name} 趋势窗口读取成功`);
                     break;
                   } catch (error) {
-                    reason = collectionError(error, page ? failure : "打开云图人群资产页面失败");
+                    reason = collectionError(error, page ? "读取云图 A2 趋势失败" : "打开云图人群资产页面失败");
                     diagnostics = `stage=${stage} ${scope} attempt=${attempt}/3 ${a2ErrorDetails(error, reason)} duration_ms=${Math.round(performance.now() - attemptStarted)} ${network}`;
                     debug(`${diagnostics} ${game.name}：${reason}`);
                     if (page && pageInterruption(error)) {
-                      debug(`${game.name} ${date} 当前页面失效，将关闭并在下次尝试时重新打开`);
+                      debug(`${scope} ${game.name} 当前页面失效，将关闭并在下次尝试时重新打开`);
                       await closeCollectionPage(page, trace);
                       page = undefined;
                     }
                     if (attempt === 3 || reason.startsWith("云图登录未恢复")) break;
-                    debug(`${game.name} ${date} 等待 ${attempt} 秒后重试`);
+                    debug(`${scope} ${game.name} 等待 ${attempt} 秒后重试趋势窗口`);
                     await Bun.sleep(1000 * attempt);
                   }
                 }
-                if (!values) {
-                  errors.push(`${game.name} ${date}：${reason}`);
+                if (!points) {
+                  errors.push(`${game.name} 截至 ${window.end} 的趋势窗口：${reason}`);
                   trace.error(`${diagnostics} ${game.name}：${reason}`);
                   if (reason.startsWith("云图登录未恢复")) break;
                   continue;
                 }
+                const earliest = [...points.keys()].sort()[0]!;
+                const datesToCheck = new Set([...window.dates, ...missingDates([...existing], window.end, earliest)]);
+                const rows: ReturnType<typeof readTrendPoint>[] = [];
+                const failuresBefore = errors.length;
+                for (const date of [...datesToCheck].sort().reverse()) {
+                  if (existing.has(date) && !(refreshLatest && date === through)) continue;
+                  try { rows.push(readTrendPoint(points, date)); }
+                  catch (error) {
+                    const reason = collectionError(error, "云图趋势日期数据无效");
+                    errors.push(`${game.name} ${date}：${reason}`);
+                    trace.error(`stage=cloud_metrics ${scope} date=${date} ${a2ErrorDetails(error, reason)} ${game.name}：${reason}`);
+                  }
+                }
+                let stage = "feishu_write";
+                let stageStarted = performance.now();
                 try {
-                  stage = "feishu_write";
-                  stageStarted = performance.now();
-                  const createOnly = !refreshLatest || date !== through;
-                  debug(`stage=${stage} ${scope} policy=${createOnly ? "insert_missing" : "refresh_latest"} ${game.name} 开始写入飞书多维表`);
-                  failure = "飞书多维表写入失败";
-                  const action = await sink.upsert(game.name, date, values, { createOnly });
-                  if (action !== "already_exists") written++;
-                  debug(`stage=${stage} ${scope} action=${action} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 写入处理完成`);
-                  if (state.day !== day) { state.day = day; state.done = []; }
-                  state.done ??= [];
-                  if (!state.done.includes(key)) state.done.push(key);
+                  if (rows.length) {
+                    debug(`stage=${stage} ${scope} rows=${rows.length} ${game.name} 批量写入并核验飞书日期`);
+                    const result = await sink.upsertMany(game.name, rows, { updateDates: refreshLatest ? [through] : [] });
+                    written += result.created + result.updated;
+                    debug(`stage=${stage} ${scope} created=${result.created} updated=${result.updated} verified=${result.verified} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 批量写入完成`);
+                    if (state.day !== day) { state.day = day; state.done = []; }
+                    const done = new Set<string>(state.done);
+                    for (const { date } of rows) {
+                      existing.add(date);
+                      done.add(`${game.code}:${date}`);
+                    }
+                    state.done = [...done];
+                  }
+                  if (window.end === through && existing.has(through) && errors.length === failuresBefore) {
+                    state.trendCheckedThrough ??= {};
+                    state.trendCheckedThrough[game.code] = through;
+                  }
                   stage = "state_write";
                   stageStarted = performance.now();
-                  failure = "保存采集进度失败";
                   await atomicJson(path, state);
                   debug(`stage=${stage} ${scope} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name} 进度已保存`);
                 } catch (error) {
-                  const reason = collectionError(error, failure);
-                  errors.push(`${game.name} ${date}：${reason}`);
+                  const reason = collectionError(error, stage === "state_write" ? "保存采集进度失败" : "飞书多维表批量写入失败");
+                  errors.push(`${game.name} 截至 ${window.end} 的趋势窗口：${reason}`);
                   trace.error(`stage=${stage} ${scope} ${a2ErrorDetails(error, reason)} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name}：${reason}`);
                 }
               }
             } catch (error) {
-              const reason = collectionError(error, failure);
+              const reason = collectionError(error, "处理云图趋势窗口失败");
               errors.push(`${game.name}：${reason}`);
-              trace.error(`stage=${stage} game=${game.code}${activeDate ? ` date=${activeDate}` : ""} ${a2ErrorDetails(error, reason)} duration_ms=${Math.round(performance.now() - stageStarted)} ${game.name}：${reason}`);
+              trace.error(`stage=trend_window game=${game.code} ${a2ErrorDetails(error, reason)} ${game.name}：${reason}`);
             } finally {
               await closeCollectionPage(page, trace);
             }
@@ -456,7 +477,7 @@ export class A2Service {
       trace.error(`stage=state_write code=state_write_failed ${reason}`);
       throw new A2CollectionError(reason);
     });
-    trace.info(`stage=finish result=${errors.length ? "error" : "success"} day=${day} through=${through} pending=${[...plans.values()].reduce((count, pending) => count + pending.length, 0)} written=${written} failures=${errors.length} duration_ms=${Math.round(performance.now() - started)} 采集结束`);
+    trace.info(`stage=finish result=${errors.length ? "error" : "success"} day=${day} through=${through} games=${plans.size} written=${written} failures=${errors.length} duration_ms=${Math.round(performance.now() - started)} 采集结束`);
     if (errors.length) throw new A2CollectionError(errors.join("；"));
   }
 }
@@ -578,7 +599,7 @@ export class A2Base {
     await this.api(`${tableRoot}/records`, "POST", { fields: fieldsValue });
     return "created";
   }
-  async upsertMany(name: string, input: Array<{ date: string; A2: number; other_A2: number }>) {
+  async upsertMany(name: string, input: Array<{ date: string; A2: number; other_A2: number }>, { updateDates }: { updateDates?: readonly string[] } = {}) {
     const tableRoot = await this.tableRoot(name);
     const existing = await this.items(`${tableRoot}/records`, "items");
     const index = new Map<string, string>();
@@ -592,10 +613,12 @@ export class A2Base {
       index.set(date, row.record_id);
     }
     const creates: any[] = [], updates: any[] = [];
+    const preserved = new Set<string>();
     for (const row of input) {
       const record = { fields: { 日期: Date.parse(`${row.date}T00:00:00+08:00`), A2: row.A2, other_A2: row.other_A2, 游戏: name } };
       const id = index.get(row.date);
-      if (id) updates.push({ record_id: id, ...record });
+      if (id && updateDates && !updateDates.includes(row.date)) preserved.add(row.date);
+      else if (id) updates.push({ record_id: id, ...record });
       else creates.push(record);
     }
     for (const [action, records] of [["batch_create", creates], ["batch_update", updates]] as const) {
@@ -616,7 +639,9 @@ export class A2Base {
       const fields = actual.get(row.date);
       // Bitable returns numeric fields as decimal strings on some Base versions.
       const number = (value: unknown) => typeof value === "number" || typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
-      if (!fields || number(fields.A2) !== row.A2 || number(fields.other_A2) !== row.other_A2 || fields["游戏"] !== name) throw new Error(`日期 ${row.date} 写入核验失败`);
+      if (!fields || (!preserved.has(row.date) && (number(fields.A2) !== row.A2 || number(fields.other_A2) !== row.other_A2 || fields["游戏"] !== name))) {
+        throw new Error(`日期 ${row.date} 写入核验失败`);
+      }
     }
     return { created: creates.length, updated: updates.length, verified: input.length };
   }

@@ -1,5 +1,5 @@
 import { expect, test, spyOn } from "bun:test";
-import { historyWindows, parseTrend } from "../src/a2-history.ts";
+import { historyWindows, parseTrend, trendWindowsForDates } from "../src/a2-history.ts";
 import { A2Base } from "../src/a2-service.ts";
 
 test("全年历史以三月底查询首个90天，分段连续且无遗漏",()=>{
@@ -7,6 +7,13 @@ test("全年历史以三月底查询首个90天，分段连续且无遗漏",()=>
  expect(windows).toEqual([{start:"2026-01-01",end:"2026-03-31"},{start:"2026-04-01",end:"2026-06-29"},{start:"2026-06-30",end:"2026-09-27"},{start:"2026-09-28",end:"2026-11-15"}]);
  expect(()=>historyWindows("2026-02-30","2026-11-15")).toThrow();
  expect(()=>historyWindows("2026-11-15","2026-01-01")).toThrow();
+});
+test("离散缺口在同一个 90 天趋势窗口合并，超过窗口才另外请求", () => {
+  expect(trendWindowsForDates(["2026-01-01", "2026-03-31", "2026-04-01", "2026-04-01", "2026-02-01"]))
+    .toEqual([
+      { start: "2026-02-01", end: "2026-04-01", dates: ["2026-04-01", "2026-03-31", "2026-02-01"] },
+      { start: "2026-01-01", end: "2026-01-01", dates: ["2026-01-01"] },
+    ]);
 });
 test("趋势使用数值及其他品牌，截断窗口外日期，缺日和重复不补零",()=>{
  const point={date:"2026-01-01",cover_num:"885588",count_average:"10178321"};
@@ -40,6 +47,8 @@ test("批量写入按100条分批，已有日期更新，分页读回核验，�
   expect(calls.filter(c=>c.path.includes("/fields/")).every(c=>c.body.property.formatter==="1,000")).toBe(true);
   const rerun=await sink.upsertMany("万龙觉醒",rows);
   expect(rerun).toEqual({created:0,updated:205,verified:205});expect(store.size).toBe(205);
+  const kept=await sink.upsertMany("万龙觉醒",[{...rows[0]!, A2:9999}], { updateDates: [] });
+  expect(kept).toEqual({created:0,updated:0,verified:1});expect(store.get("existing").fields.A2).toBe(rows[0]!.A2);
   for(const record of store.values()) delete record.fields["游戏"];
   const filled=await sink.populateGame("万龙觉醒");
   expect(filled).toEqual({updated:205,verified:205});

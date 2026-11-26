@@ -9,30 +9,74 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 }, "无效日期");
 export const historyInput = z.object({ start: isoDate.default("2026-01-01"), end: isoDate.optional() });
 export type A2HistoryRow = { date: string; A2: number; other_A2: number };
+const trendWindowDays = 90;
 function shift(date: string, n: number) { return new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10); }
+export function trendWindowStart(end: string) { return shift(end, 1 - trendWindowDays); }
 export function historyWindows(start: string, end: string) {
   isoDate.parse(start); isoDate.parse(end);
   if (start > end || Date.parse(end) - Date.parse(start) > 3660 * 86400000) throw new Error("历史日期范围无效");
   const windows: Array<{ start: string; end: string }> = [];
   for (let from = start; from <= end;) {
-    const to = shift(from, 89) < end ? shift(from, 89) : end;
+    const windowEnd = shift(from, trendWindowDays - 1);
+    const to = windowEnd < end ? windowEnd : end;
     windows.push({ start: from, end: to }); from = shift(to, 1);
   }
   return windows;
 }
-export function parseTrend(payload: any, start: string, end: string): A2HistoryRow[] {
+
+export function trendWindowsForDates(dates: readonly string[]) {
+  const pending = [...new Set(dates)].sort().reverse();
+  const windows: Array<{ start: string; end: string; dates: string[] }> = [];
+  for (let index = 0; index < pending.length;) {
+    const end = pending[index]!;
+    const earliest = trendWindowStart(end);
+    const wanted: string[] = [];
+    while (index < pending.length && pending[index]! >= earliest) wanted.push(pending[index++]!);
+    windows.push({ start: wanted.at(-1)!, end, dates: wanted });
+  }
+  return windows;
+}
+
+export function trendRequestUrl(templateUrl: string, end: string) {
+  const url = new URL(templateUrl);
+  url.pathname = "/yuntu_ng/api/v1/get_audience_asset_trend";
+  for (const key of [...url.searchParams.keys()]) {
+    if (!["aadvid", "brand_id", "industry_id"].includes(key)) url.searchParams.delete(key);
+  }
+  if (!url.searchParams.get("brand_id")) throw new Error("请求模板缺少 brand_id");
+  url.searchParams.set("date", end.replaceAll("-", ""));
+  url.searchParams.set("card", "2");
+  url.searchParams.set("benchmark", "1");
+  return url.href;
+}
+
+export function indexTrendPoints(payload: any, start: string, end: string) {
   if (payload?.status !== 0 || payload?.data?.BaseResp?.StatusCode && payload.data.BaseResp.StatusCode !== 0 || !Array.isArray(payload?.data?.trend_points)) throw new Error("云图历史趋势返回错误");
-  const rows = new Map<string, A2HistoryRow>();
+  const points = new Map<string, any[]>();
   for (const point of payload.data.trend_points) {
     const date = isoDate.parse(point.date);
     if (date < start || date > end) continue;
-    if (rows.has(date)) throw new Error(`云图历史日期重复：${date}`);
-    rows.set(date, { date, ...parseA2({ status: 0, data: { profile: [{ ...point, title: "a2" }] } }) });
+    const matches = points.get(date) ?? [];
+    matches.push(point);
+    points.set(date, matches);
   }
+  return points;
+}
+
+export function readTrendPoint(points: ReturnType<typeof indexTrendPoints>, date: string): A2HistoryRow {
+  const matches = points.get(date);
+  if (!matches) throw new Error(`云图历史缺少日期 ${date}，不会补零`);
+  if (matches.length > 1) throw new Error(`云图历史日期重复：${date}`);
+  return { date, ...parseA2({ status: 0, data: { profile: [{ ...matches[0], title: "a2" }] } }) };
+}
+
+export function parseTrend(payload: unknown, start: string, end: string): A2HistoryRow[] {
+  const points = indexTrendPoints(payload, start, end);
+  const rows: A2HistoryRow[] = [];
   for (let date = start; date <= end; date = shift(date, 1)) {
-    if (!rows.has(date)) throw new Error(`云图历史缺少日期 ${date}，不会补零`);
+    rows.push(readTrendPoint(points, date));
   }
-  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return rows;
 }
 type Options = { dir: string; appId: string; appSecret: string; wikiToken: string; executablePath: string; debug?: boolean };
 export async function backfillA2(options: Options, start: string, end = a2Dates().dates[0]!) {
@@ -85,17 +129,12 @@ export async function backfillA2(options: Options, start: string, end = a2Dates(
           for (const window of windows) {
             if (cache.windows.includes(window.end)) continue;
             debug(`${game.name} 请求 ${window.start} 至 ${window.end} 的历史趋势（超时 ${A2_CLOUD_TIMEOUT_MS / 1000} 秒）`);
-            const u = new URL(template.url);
-            u.pathname = "/yuntu_ng/api/v1/get_audience_asset_trend";
-            for (const key of [...u.searchParams.keys()]) if (!["aadvid", "brand_id", "industry_id"].includes(key)) u.searchParams.delete(key);
-            if (!u.searchParams.get("brand_id")) throw new Error("请求模板缺少 brand_id");
-            u.searchParams.set("date", window.end.replaceAll("-", ""));
-            u.searchParams.set("card", "2"); u.searchParams.set("benchmark", "1");
+            const url = trendRequestUrl(template.url, window.end);
             stageStarted = performance.now();
             activeWindow = ` from=${window.start} through=${window.end}`;
             stage = "cloud_request";
             network = "";
-            const payload = await readA2CloudJson(page, u.href, template.headers, details => { network = details; });
+            const payload = await readA2CloudJson(page, url, template.headers, details => { network = details; });
             debug(`stage=${stage} game=${game.code}${activeWindow} duration_ms=${Math.round(performance.now() - stageStarted)} ${network} 历史趋势请求返回`);
             stage = "cloud_metrics";
             for (const row of parseTrend(payload, window.start, window.end)) points.set(row.date, row);
